@@ -1328,34 +1328,30 @@ pub fn generate_receipt_for_transaction(
                 Reference: {}\n\
                 Type: {}\n\
                 Amount: ${:.2}\n\
-                Account: {}{}\n\
-                Date/Time: {}\n\
                 Status: {}\n\
-                ====================\n\
-                This receipt serves as proof of transaction.\n\
-                Keep this for your records.",
+                Date/Time: {}\n\
+                Account: {}{}\n\
+                \n\
+                This is an official record of your transaction.\n\
+                Please keep this receipt for your records.",
                 receipt_id,
                 transaction.id,
                 reference,
                 transaction_type_str,
                 transaction.amount,
-                transaction.account_id,
-                transfer_details,
+                transaction.status.as_str().to_uppercase(),
                 formatted_timestamp,
-                transaction.status.as_str().to_uppercase()
+                transaction.account_id,
+                transfer_details
             );
-            
-            // In a real system, we might store this receipt in the database
-            // or send it to the user via email
             
             Ok(receipt)
         },
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            Err(TransactionError::Unknown("Transaction not found".to_string()))
+        },
         Err(e) => {
-            if let rusqlite::Error::QueryReturnedNoRows = e {
-                Err(TransactionError::Unknown("Transaction not found".to_string()))
-            } else {
-                Err(TransactionError::DatabaseError(e.to_string()))
-            }
+            Err(TransactionError::DatabaseError(e.to_string()))
         }
     }
 }

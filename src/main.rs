@@ -897,9 +897,9 @@ fn main() {
                             });
                             
                             match security::authenticate(&conn, &token) {
-                                Ok(auth_result) => {
+                                Ok(auth) => {
                                     if let Err(e) = cli::account::display_transaction_history(
-                                        &auth_result, 
+                                        &auth, 
                                         &id, 
                                         limit, 
                                         offset, 
@@ -930,8 +930,8 @@ fn main() {
                             });
                             
                             match security::authenticate(&conn, &token) {
-                                Ok(auth_result) => {
-                                    if let Err(e) = cli::account::get_transaction_receipt(&auth_result, &id) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::account::get_transaction_receipt(&auth, &id) {
                                         println!("Error retrieving transaction receipt: {}", e);
                                     }
                                 },
@@ -948,24 +948,298 @@ fn main() {
                     }
                 },
                 AccountCommands::Schedule { id, r#type, amount, date, to, details } => {
-                    println!("Scheduling transaction: {} {} {} {} {} {}", id, r#type, amount, date, to.as_deref().unwrap_or("None"), details.as_deref().unwrap_or("None"));
-                    // TODO: Implement transaction scheduling
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    // Parse transaction type
+                                    let transaction_type = match r#type.to_lowercase().as_str() {
+                                        "deposit" => database::models::TransactionType::Deposit,
+                                        "withdrawal" => database::models::TransactionType::Withdrawal,
+                                        "transfer" => database::models::TransactionType::Transfer,
+                                        _ => {
+                                            println!("Invalid transaction type. Must be deposit, withdrawal, or transfer.");
+                                            process::exit(1);
+                                        }
+                                    };
+                                    
+                                    // Parse scheduled date
+                                    let scheduled_date = match chrono::NaiveDateTime::parse_from_str(&date, "%Y-%m-%d %H:%M:%S") {
+                                        Ok(dt) => chrono::DateTime::from_naive_utc_and_offset(dt, chrono::Utc),
+                                        Err(_) => {
+                                            println!("Invalid date format. Please use YYYY-MM-DD HH:MM:SS format.");
+                                            process::exit(1);
+                                        }
+                                    };
+                                    
+                                    // Validate transfer has a destination account
+                                    if transaction_type == database::models::TransactionType::Transfer && to.is_none() {
+                                        println!("Transfer transactions require a destination account (--to).");
+                                        process::exit(1);
+                                    }
+                                    
+                                    // Schedule the transaction
+                                    match account::schedule_transaction(
+                                        &conn,
+                                        &auth,
+                                        &id,
+                                        transaction_type,
+                                        amount,
+                                        scheduled_date,
+                                        details.as_deref(),
+                                        to.as_deref()
+                                    ) {
+                                        Ok(scheduled_id) => {
+                                            println!("✅ Transaction scheduled successfully!");
+                                            println!("Scheduled ID: {}", scheduled_id);
+                                            println!("Account: {}", id);
+                                            println!("Type: {}", r#type);
+                                            println!("Amount: ${:.2}", amount);
+                                            println!("Scheduled for: {}", date);
+                                            if let Some(to_account) = to {
+                                                println!("To account: {}", to_account);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!("Error scheduling transaction: {}", e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to schedule transactions.");
+                            process::exit(1);
+                        }
+                    }
                 },
                 AccountCommands::Recurring { id, r#type, amount, frequency, start_date, end_date, to, details } => {
-                    println!("Creating recurring transaction: {} {} {} {} {} {} {} {}", id, r#type, amount, frequency, start_date, end_date.as_deref().unwrap_or("None"), to.as_deref().unwrap_or("None"), details.as_deref().unwrap_or("None"));
-                    // TODO: Implement recurring transaction creation
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    // Parse transaction type
+                                    let transaction_type = match r#type.to_lowercase().as_str() {
+                                        "deposit" => database::models::TransactionType::Deposit,
+                                        "withdrawal" => database::models::TransactionType::Withdrawal,
+                                        "transfer" => database::models::TransactionType::Transfer,
+                                        _ => {
+                                            println!("Invalid transaction type. Must be deposit, withdrawal, or transfer.");
+                                            process::exit(1);
+                                        }
+                                    };
+                                    
+                                    // Parse frequency
+                                    let recurrence_frequency = match frequency.to_lowercase().as_str() {
+                                        "daily" => account::RecurrenceFrequency::Daily,
+                                        "weekly" => account::RecurrenceFrequency::Weekly,
+                                        "biweekly" => account::RecurrenceFrequency::BiWeekly,
+                                        "monthly" => account::RecurrenceFrequency::Monthly,
+                                        "quarterly" => account::RecurrenceFrequency::Quarterly,
+                                        "yearly" => account::RecurrenceFrequency::Yearly,
+                                        _ => {
+                                            println!("Invalid frequency. Must be daily, weekly, biweekly, monthly, quarterly, or yearly.");
+                                            process::exit(1);
+                                        }
+                                    };
+                                    
+                                    // Parse dates
+                                    let start = match chrono::NaiveDate::parse_from_str(&start_date, "%Y-%m-%d") {
+                                        Ok(date) => {
+                                            // Convert to DateTime with midnight time
+                                            let naive_dt = date.and_hms_opt(0, 0, 0).unwrap();
+                                            chrono::DateTime::from_naive_utc_and_offset(naive_dt, chrono::Utc)
+                                        },
+                                        Err(_) => {
+                                            println!("Invalid start date format. Please use YYYY-MM-DD format.");
+                                            process::exit(1);
+                                        }
+                                    };
+                                    
+                                    let end = if let Some(end_str) = end_date.as_deref() {
+                                        match chrono::NaiveDate::parse_from_str(end_str, "%Y-%m-%d") {
+                                            Ok(date) => {
+                                                // Convert to DateTime with end of day time
+                                                let naive_dt = date.and_hms_opt(23, 59, 59).unwrap();
+                                                Some(chrono::DateTime::from_naive_utc_and_offset(naive_dt, chrono::Utc))
+                                            },
+                                            Err(_) => {
+                                                println!("Invalid end date format. Please use YYYY-MM-DD format.");
+                                                process::exit(1);
+                                            }
+                                        }
+                                    } else {
+                                        None
+                                    };
+                                    
+                                    // Validate transfer has a destination account
+                                    if transaction_type == database::models::TransactionType::Transfer && to.is_none() {
+                                        println!("Transfer transactions require a destination account (--to).");
+                                        process::exit(1);
+                                    }
+                                    
+                                    // Create recurring transaction
+                                    match account::create_recurring_transaction(
+                                        &conn,
+                                        &auth,
+                                        &id,
+                                        transaction_type,
+                                        amount,
+                                        recurrence_frequency,
+                                        start,
+                                        end,
+                                        details.as_deref(),
+                                        to.as_deref()
+                                    ) {
+                                        Ok(recurring_id) => {
+                                            println!("✅ Recurring transaction created successfully!");
+                                            println!("Recurring ID: {}", recurring_id);
+                                            println!("Account: {}", id);
+                                            println!("Type: {}", r#type);
+                                            println!("Amount: ${:.2}", amount);
+                                            println!("Frequency: {}", frequency);
+                                            println!("Start date: {}", start_date);
+                                            if let Some(end_str) = end_date {
+                                                println!("End date: {}", end_str);
+                                            } else {
+                                                println!("End date: Never (until cancelled)");
+                                            }
+                                            if let Some(to_account) = to {
+                                                println!("To account: {}", to_account);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!("Error creating recurring transaction: {}", e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to create recurring transactions.");
+                            process::exit(1);
+                        }
+                    }
                 },
                 AccountCommands::CancelScheduled { id } => {
-                    println!("Canceling scheduled transaction: {}", id);
-                    // TODO: Implement scheduled transaction cancellation
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    match account::cancel_scheduled_transaction(&conn, &auth, &id) {
+                                        Ok(()) => {
+                                            println!("✅ Scheduled transaction cancelled successfully!");
+                                            println!("Scheduled transaction ID: {}", id);
+                                        },
+                                        Err(e) => {
+                                            println!("Error cancelling scheduled transaction: {}", e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to cancel scheduled transactions.");
+                            process::exit(1);
+                        }
+                    }
                 },
                 AccountCommands::CancelRecurring { id } => {
-                    println!("Canceling recurring transaction: {}", id);
-                    // TODO: Implement recurring transaction cancellation
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    match account::cancel_recurring_transaction(&conn, &auth, &id) {
+                                        Ok(()) => {
+                                            println!("✅ Recurring transaction cancelled successfully!");
+                                            println!("Recurring transaction ID: {}", id);
+                                        },
+                                        Err(e) => {
+                                            println!("Error cancelling recurring transaction: {}", e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to cancel recurring transactions.");
+                            process::exit(1);
+                        }
+                    }
                 },
                 AccountCommands::ProcessScheduled {} => {
-                    println!("Running scheduler to process pending scheduled transactions");
-                    // TODO: Implement scheduled transaction processing
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    // Check if user has admin permissions
+                                    if !auth.permissions.contains(&"admin".to_string()) && 
+                                       !auth.permissions.contains(&"process_scheduled_transactions".to_string()) {
+                                        println!("Permission denied: Only admins or users with process_scheduled_transactions permission can run this command.");
+                                        process::exit(1);
+                                    }
+                                    
+                                    match account::process_scheduled_transactions(&conn) {
+                                        Ok(count) => {
+                                            println!("✅ Processed {} scheduled transactions", count);
+                                        },
+                                        Err(e) => {
+                                            println!("Error processing scheduled transactions: {}", e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to process scheduled transactions.");
+                            process::exit(1);
+                        }
+                    }
                 },
                 AccountCommands::List { user_id } => {
                     match get_auth_token() {
@@ -1080,9 +1354,9 @@ fn main() {
                             });
                             
                             match security::authenticate(&conn, &token) {
-                                Ok(auth_result) => {
+                                Ok(auth) => {
                                     if let Err(e) = cli::account::export_transaction_history(
-                                        &auth_result, 
+                                        &auth, 
                                         &id, 
                                         &format, 
                                         &output, 

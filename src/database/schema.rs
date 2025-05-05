@@ -3,7 +3,7 @@ use log::debug;
 use rusqlite::Connection;
 
 /// Create the database schema
-pub fn create_schema(conn: &Connection) -> Result<()> {
+pub fn create_schema(conn: &mut Connection) -> Result<()> {
     debug!("Creating database schema");
     
     // Use a transaction to ensure all tables are created or none
@@ -177,7 +177,7 @@ pub fn create_schema(conn: &Connection) -> Result<()> {
 }
 
 /// Create triggers for audit logging
-pub fn create_audit_triggers(conn: &Connection) -> Result<()> {
+pub fn create_audit_triggers(conn: &mut Connection) -> Result<()> {
     debug!("Creating audit triggers");
     
     // Create trigger for account modifications

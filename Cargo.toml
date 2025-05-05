@@ -46,6 +46,8 @@ uuid = { version = "1.5", features = ["v4", "serde"] }
 lazy_static = "1.4"
 toml = "0.7"
 regex = "1.9"
+qrcode = { version = "0.12", features = ["unicode"] }
+base32 = "0.4"
 
 # Testing
 tempfile = "3.8"

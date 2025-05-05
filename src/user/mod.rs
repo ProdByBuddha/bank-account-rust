@@ -5,10 +5,16 @@
 mod registration;
 mod validation;
 mod profile;
+mod two_factor;  // New module for 2FA management
 
 pub use registration::{register_user, UserRegistrationError};
 pub use validation::{validate_password, PasswordRequirement, PasswordValidationError};
 pub use profile::{get_user_profile, update_user_profile, UserProfileError};
+pub use two_factor::{
+    enable_2fa, verify_2fa_setup, disable_2fa, 
+    verify_2fa_code, generate_backup_codes, use_backup_code,
+    TwoFactorError
+};
 
 /// Max failed login attempts before account lockout
 pub const MAX_FAILED_LOGIN_ATTEMPTS: u32 = 5;

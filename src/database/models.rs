@@ -378,4 +378,28 @@ impl Token {
             revoked_at: None,
         }
     }
+}
+
+/// Recovery code model for 2FA backup codes
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RecoveryCode {
+    pub id: String,
+    pub user_id: String,
+    pub code_hash: String,
+    pub used: bool,
+    pub created_at: DateTime<Utc>,
+    pub used_at: Option<DateTime<Utc>>,
+}
+
+impl RecoveryCode {
+    pub fn new(user_id: String, code_hash: String) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            user_id,
+            code_hash,
+            used: false,
+            created_at: Utc::now(),
+            used_at: None,
+        }
+    }
 } 

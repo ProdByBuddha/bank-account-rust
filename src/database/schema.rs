@@ -1,6 +1,7 @@
 use anyhow::{Result, Context};
 use log::debug;
 use rusqlite::Connection;
+use crate::security::trusted_devices;
 
 /// Create the database schema
 pub fn create_schema(conn: &mut Connection) -> Result<()> {
@@ -171,6 +172,9 @@ pub fn create_schema(conn: &mut Connection) -> Result<()> {
     
     // Commit the transaction
     tx.commit().context("Failed to commit schema creation transaction")?;
+    
+    // Create trusted devices schema
+    trusted_devices::create_schema(conn).context("Failed to create trusted devices schema")?;
     
     debug!("Database schema created successfully");
     Ok(())

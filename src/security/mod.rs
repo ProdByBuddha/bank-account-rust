@@ -13,6 +13,7 @@ pub mod compliance;
 pub mod password;
 pub mod encryption;  // New encryption module with enhanced key management
 pub mod auth;  // New authentication middleware module
+pub mod trusted_devices;  // New module for trusted device management
 
 // Re-export key functions from encryption module
 pub use encryption::{
@@ -37,6 +38,18 @@ pub use auth::{
     AuthResult,
     AuthError,
     SessionTimeoutConfig,
+};
+
+// Re-export TOTP functions
+pub use totp::{
+    generate_secret as generate_totp_secret,
+    create_totp,
+    generate_code as generate_totp_code,
+    verify_code as verify_totp_code,
+    generate_uri as generate_totp_uri,
+    generate_recovery_codes,
+    hash_recovery_code,
+    TotpConfig,
 };
 
 // Length of the AES-256 key

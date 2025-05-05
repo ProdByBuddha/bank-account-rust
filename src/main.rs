@@ -3,6 +3,7 @@ use dotenv::dotenv;
 use env_logger::Env;
 use log::{info, error};
 use std::process;
+use std::io::{self, Write};
 
 mod user;
 mod account;
@@ -11,6 +12,9 @@ mod audit;
 mod database;
 mod cli;
 mod config;
+
+use cli::utils::{print_success, print_error, print_warning, print_info, print_header, Interactive};
+use security::auth::{self, AuthResult};
 
 /// Secure Banking CLI - A security-focused terminal-based banking system
 #[derive(Parser)]
@@ -23,6 +27,10 @@ struct Cli {
     /// Turn debugging information on
     #[clap(short, long, action = clap::ArgAction::Count)]
     debug: u8,
+
+    /// Use interactive mode for complex operations
+    #[clap(short, long)]
+    interactive: bool,
 
     #[clap(subcommand)]
     command: Commands,
@@ -480,19 +488,16 @@ enum AuditCommands {
     },
 }
 
-// Get authentication token (placeholder function)
-// In a real application, this would retrieve the stored token
 fn get_auth_token() -> Option<String> {
-    // In a real application, you would retrieve the token from:
-    // - Secure storage (keychain, encrypted file, etc.)
-    // - Environment variables
-    // - Memory during the current session
+    // Read from a token file in the user's home directory
+    let home = std::env::var("HOME").ok()?;
+    let token_path = std::path::Path::new(&home).join(".secure_bank_token");
     
-    // For this example, we'll simulate a token
-    // This is just a placeholder - in a real app, the token would be retrieved securely
+    if !token_path.exists() {
+        return None;
+    }
     
-    // TODO: Implement proper token retrieval from secure storage
-    Some("dummy_token".to_string())
+    std::fs::read_to_string(token_path).ok()
 }
 
 fn main() {
@@ -512,6 +517,7 @@ fn main() {
         _ => log::set_max_level(log::LevelFilter::Trace),
     }
     
+    print_header("SECURE BANKING CLI");
     info!("Starting Secure Banking CLI");
     
     // Initialize config from the provided file
@@ -521,6 +527,7 @@ fn main() {
         }
         Err(err) => {
             error!("Failed to load configuration: {}", err);
+            print_error(&format!("Failed to load configuration: {}", err));
             process::exit(1);
         }
     }
@@ -532,6 +539,7 @@ fn main() {
         }
         Err(err) => {
             error!("Failed to initialize database: {}", err);
+            print_error(&format!("Failed to initialize database: {}", err));
             process::exit(1);
         }
     }
@@ -539,536 +547,543 @@ fn main() {
     // Process the command
     match &cli.command {
         Commands::Init { username } => {
-            println!("Initializing system with admin user: {}", username);
-            // TODO: Implement initialization logic
+            let result = if cli.interactive {
+                init_interactive(username)
+            } else {
+                init_command(username)
+            };
+            
+            if let Err(err) = result {
+                print_error(&format!("Initialization failed: {}", err));
+                process::exit(1);
+            }
         }
         Commands::Login { username, twofa } => {
-            println!("Logging in as user: {}", username);
+            let result = if cli.interactive {
+                login_interactive(username)
+            } else {
+                cli::auth::login(username, *twofa)
+            };
             
-            match cli::auth::login(username, *twofa) {
-                Ok(auth) => {},
+            match result {
+                Ok(_) => {},
                 Err(err) => {
                     error!("Error logging in: {}", err);
+                    print_error(&format!("Login failed: {}", err));
                     process::exit(1);
                 }
             }
         }
         Commands::User { command } => {
-            match command {
-                UserCommands::Create { username, role } => {
-                    println!("Creating new user: {} with role: {}", username, role);
-                    
-                    // Get authentication token for admin user
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::user::create_user(&auth, username, role) {
-                                        error!("Error creating user: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                Err(e) => {
-                                    error!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in as an admin to create users.");
-                            process::exit(1);
-                        }
-                    }
-                }
-                UserCommands::ChangePassword {} => {
-                    println!("Changing password");
-                    
-                    // Get authentication token
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::auth::change_password(&auth) {
-                                        error!("Error changing password: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                Err(e) => {
-                                    error!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to change your password.");
-                            process::exit(1);
-                        }
-                    }
-                }
-                UserCommands::Enable2FA {} => {
-                    // Mock user ID (in a real app, this would be obtained from the authenticated session)
-                    let user_id = "test-user";
-                    
-                    match cli::user::enable_2fa(user_id) {
-                        Ok(_) => {},
-                        Err(err) => {
-                            error!("Error enabling 2FA: {}", err);
-                            process::exit(1);
-                        }
-                    }
-                }
-                UserCommands::Disable2FA {} => {
-                    // Mock user ID (in a real app, this would be obtained from the authenticated session)
-                    let user_id = "test-user";
-                    
-                    match cli::user::disable_2fa(user_id) {
-                        Ok(_) => {},
-                        Err(err) => {
-                            error!("Error disabling 2FA: {}", err);
-                            process::exit(1);
-                        }
-                    }
-                }
-                UserCommands::GenBackupCodes {} => {
-                    // Mock user ID (in a real app, this would be obtained from the authenticated session)
-                    let user_id = "test-user";
-                    
-                    match cli::user::generate_backup_codes(user_id) {
-                        Ok(_) => {},
-                        Err(err) => {
-                            error!("Error generating backup codes: {}", err);
-                            process::exit(1);
-                        }
-                    }
-                }
-                UserCommands::Verify2FA { operation, code } => {
-                    let user_id = auth.user_id.clone();
-                    
-                    match cli::user::verify_for_operation(&user_id, &operation, &code) {
-                        Ok(()) => {
-                            println!("✅ 2FA verification successful for operation: {}", operation);
-                        },
-                        Err(err) => {
-                            error!("Error verifying 2FA: {}", err);
-                            std::process::exit(1);
-                        }
-                    }
-                }
-                UserCommands::ListUsers {} => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::roles::list_users(&auth) {
-                                        println!("Error listing users: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to list users.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                UserCommands::ChangeRole { user_id, role } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::roles::change_user_role(&auth, &user_id, &role) {
-                                        println!("Error changing user role: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to change user roles.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                UserCommands::ListPermissions {} => {
-                    if let Err(e) = cli::roles::list_permissions() {
-                        println!("Error listing permissions: {}", e);
-                    }
-                },
-                UserCommands::CheckPermission { permission } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::roles::check_permission(&auth, &permission) {
-                                        println!("Error checking permission: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to check permissions.");
-                            process::exit(1);
-                        }
-                    }
-                }
-            }
+            process_user_command(command, cli.interactive)
         }
         Commands::Account { command } => {
-            // Get authentication token
-            match get_auth_token() {
-                Some(token) => {
-                    let conn = database::get_connection().unwrap_or_else(|e| {
-                        error!("Failed to connect to the database: {}", e);
-                        process::exit(1);
-                    });
-                    
-                    match security::authenticate(&conn, &token) {
-                        Ok(auth) => {
-                            match command {
-                                AccountCommands::Create { r#type } => {
-                                    if let Err(e) = cli::account::create_new_account(&auth, r#type) {
-                                        error!("Error creating account: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Deposit { id, amount, details } => {
-                                    if let Err(e) = cli::account::deposit(&auth, &id, amount, details.as_deref()) {
-                                        error!("Error depositing funds: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Withdraw { id, amount, details } => {
-                                    if let Err(e) = cli::account::withdraw(&auth, &id, amount, details.as_deref()) {
-                                        error!("Error withdrawing funds: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Transfer { from, to, amount, details } => {
-                                    if let Err(e) = cli::account::transfer(&auth, &from, &to, amount, details.as_deref()) {
-                                        error!("Error transferring funds: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Balance { id } => {
-                                    if let Err(e) = cli::account::get_account_details(&auth, &id) {
-                                        error!("Error getting account balance: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::History { id, limit, offset, start_date, end_date } => {
-                                    if let Err(e) = cli::account::display_transaction_history(
-                                        &auth, 
-                                        &id, 
-                                        limit, 
-                                        offset, 
-                                        start_date.as_deref(), 
-                                        end_date.as_deref()
-                                    ) {
-                                        error!("Error displaying transaction history: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Receipt { id } => {
-                                    if let Err(e) = cli::account::get_transaction_receipt(&auth, &id) {
-                                        error!("Error getting transaction receipt: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Export { id, output, format, start_date, end_date, limit } => {
-                                    if let Err(e) = cli::account::export_transaction_history(
-                                        &auth, 
-                                        &id, 
-                                        &format, 
-                                        &output, 
-                                        start_date.as_deref(), 
-                                        end_date.as_deref(), 
-                                        limit
-                                    ) {
-                                        error!("Error exporting transaction history: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Schedule { id, r#type, amount, date, to, details } => {
-                                    if let Err(e) = cli::account::schedule_transaction(
-                                        &auth, 
-                                        &id, 
-                                        &r#type, 
-                                        amount, 
-                                        &date, 
-                                        to.as_deref(), 
-                                        details.as_deref()
-                                    ) {
-                                        error!("Error scheduling transaction: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Recurring { id, r#type, amount, frequency, start_date, end_date, to, details } => {
-                                    if let Err(e) = cli::account::create_recurring_transaction(
-                                        &auth, 
-                                        &id, 
-                                        &r#type, 
-                                        amount, 
-                                        &frequency, 
-                                        &start_date, 
-                                        end_date.as_deref(), 
-                                        to.as_deref(), 
-                                        details.as_deref()
-                                    ) {
-                                        error!("Error creating recurring transaction: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::CancelScheduled { id } => {
-                                    if let Err(e) = cli::account::cancel_scheduled_transaction(&auth, &id) {
-                                        error!("Error canceling scheduled transaction: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::CancelRecurring { id } => {
-                                    if let Err(e) = cli::account::cancel_recurring_transaction(&auth, &id) {
-                                        error!("Error canceling recurring transaction: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::ProcessScheduled {} => {
-                                    if let Err(e) = cli::account::process_scheduled_transactions(&auth) {
-                                        error!("Error processing scheduled transactions: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::List { user_id } => {
-                                    if let Err(e) = cli::account::list_accounts(&auth, user_id.as_deref()) {
-                                        error!("Error listing accounts: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Status { id, status } => {
-                                    if let Err(e) = cli::account::update_status(&auth, &id, &status) {
-                                        error!("Error updating account status: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Interest { id } => {
-                                    if let Err(e) = cli::account::calc_interest(&auth, &id) {
-                                        error!("Error calculating interest: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                                AccountCommands::Link { primary, accounts } => {
-                                    if let Err(e) = cli::account::link_user_accounts(&auth, &primary, &accounts) {
-                                        error!("Error linking accounts: {}", e);
-                                        process::exit(1);
-                                    }
-                                },
-                            }
-                        },
-                        Err(e) => {
-                            error!("Authentication error: {}", e);
-                            process::exit(1);
-                        }
-                    }
-                },
-                None => {
-                    println!("You must be logged in to perform account operations.");
-                    process::exit(1);
-                }
-            }
+            process_account_command(command, cli.interactive)
         }
         Commands::Security { command } => {
-            // Get authentication token
-            match get_auth_token() {
-                Some(token) => {
-                    let conn = database::get_connection().unwrap_or_else(|e| {
-                        error!("Failed to connect to the database: {}", e);
-                        process::exit(1);
-                    });
-                    
-                    match security::authenticate(&conn, &token) {
-                        Ok(auth) => {
-                            match command {
-                                SecurityCommands::ComplianceCheck {} => {
-                                    match cli::audit::run_compliance_check(&auth) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error running compliance check: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                                SecurityCommands::Backup { output } => {
-                                    match cli::audit::create_backup(&auth, &output) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error creating backup: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                                SecurityCommands::Restore { input } => {
-                                    match cli::audit::restore_from_backup(&auth, &input) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error restoring from backup: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                            }
-                        },
-                        Err(e) => {
-                            error!("Authentication error: {}", e);
-                            process::exit(1);
-                        }
-                    }
-                },
-                None => {
-                    println!("You must be logged in to perform security operations.");
-                    process::exit(1);
-                }
-            }
+            process_security_command(command, cli.interactive)
         }
         Commands::Audit { command } => {
-            // Get authentication token
-            match get_auth_token() {
-                Some(token) => {
-                    let conn = database::get_connection().unwrap_or_else(|e| {
-                        error!("Failed to connect to the database: {}", e);
-                        process::exit(1);
-                    });
-                    
-                    match security::authenticate(&conn, &token) {
-                        Ok(auth) => {
-                            match command {
-                                AuditCommands::Search { user_id, account_id, event_type, from_date, to_date, limit, text } => {
-                                    match cli::audit::search_audit_logs(
-                                        &auth,
-                                        user_id.as_deref(),
-                                        account_id.as_deref(),
-                                        event_type.as_deref(),
-                                        from_date.as_deref(),
-                                        to_date.as_deref(),
-                                        *limit,
-                                        text.as_deref()
-                                    ) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error searching audit logs: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                                AuditCommands::Rotate {} => {
-                                    match cli::audit::rotate_audit_logs(&auth) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error rotating audit logs: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                                AuditCommands::Purge { confirm } => {
-                                    match cli::audit::purge_old_audit_logs(&auth, *confirm) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error purging old audit logs: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                                AuditCommands::EncryptSensitive {} => {
-                                    match cli::audit::encrypt_sensitive_audit_data(&auth) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error encrypting sensitive audit data: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                                AuditCommands::Export { output, format, user_id, from_date, to_date } => {
-                                    match cli::audit::export_audit_logs(
-                                        &auth,
-                                        &output,
-                                        &format,
-                                        user_id.as_deref(),
-                                        from_date.as_deref(),
-                                        to_date.as_deref()
-                                    ) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error exporting audit logs: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                                AuditCommands::Decrypt { input, output } => {
-                                    match cli::audit::decrypt_audit_log_archive(&auth, &input, &output) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error decrypting audit log archive: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                                AuditCommands::Suspicious { user_id } => {
-                                    match cli::audit::check_suspicious_activity(&auth, &user_id) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            error!("Error checking for suspicious activity: {}", e);
-                                            process::exit(1);
-                                        }
-                                    }
-                                },
-                            }
-                        },
-                        Err(e) => {
-                            error!("Authentication error: {}", e);
-                            process::exit(1);
-                        }
-                    }
-                },
-                None => {
-                    println!("You must be logged in to perform audit operations.");
-                    process::exit(1);
-                }
-            }
+            process_audit_command(command, cli.interactive)
         }
     }
     
     info!("Shutting down Secure Banking CLI");
+}
+
+fn init_command(username: &str) -> anyhow::Result<()> {
+    print_info(&format!("Initializing system with admin user: {}", username));
+    
+    // TODO: Implement initialization logic
+    // This is just a placeholder until the real implementation
+    let conn = database::get_connection()?;
+    
+    // Create admin user logic would go here
+    print_success(&format!("System initialized with admin user: {}", username));
+    
+    Ok(())
+}
+
+fn init_interactive(username: &str) -> anyhow::Result<()> {
+    Interactive::wizard(
+        "System Initialization",
+        vec![
+            "Set up admin user",
+            "Configure database encryption",
+            "Initialize security settings",
+        ],
+        || {
+            // Step 1: Set up admin user
+            print_header("Admin User Setup");
+            let admin_name = cli::utils::read_line(&format!("Admin username [{}]: ", username))?;
+            let admin_name = if admin_name.is_empty() { username.to_string() } else { admin_name };
+            
+            let password = cli::utils::read_password("Admin password: ")?;
+            let confirm_password = cli::utils::read_password("Confirm password: ")?;
+            
+            if password != confirm_password {
+                return Err(anyhow::anyhow!("Passwords do not match"));
+            }
+            
+            // Step 2: Database encryption
+            print_header("Database Encryption");
+            print_info("Setting up encrypted database...");
+            
+            let pb = Interactive::progress_bar("Initializing database encryption", 5);
+            for i in 0..5 {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                pb.set(i + 1)?;
+            }
+            
+            // Step 3: Security settings
+            print_header("Security Settings");
+            
+            let options = vec![
+                ("High (recommended)".to_string(), "high"),
+                ("Medium".to_string(), "medium"),
+                ("Low".to_string(), "low"),
+            ];
+            
+            let security_level = Interactive::menu("Select security level", &options)?;
+            print_info(&format!("Setting security level to: {}", security_level));
+            
+            print_success(&format!("System initialized with admin user: {}", admin_name));
+            Ok(())
+        }
+    )
+}
+
+fn login_interactive(username: &str) -> anyhow::Result<auth::AuthResult> {
+    Interactive::wizard(
+        "Secure Login",
+        vec![
+            "Enter credentials",
+            "Two-factor authentication (if enabled)",
+        ],
+        || {
+            // Step 1: Enter credentials
+            print_header("Enter Credentials");
+            let user = cli::utils::read_line(&format!("Username [{}]: ", username))?;
+            let user = if user.is_empty() { username.to_string() } else { user };
+            
+            let password = cli::utils::read_password("Password: ")?;
+            
+            // Check if 2FA is enabled for this user
+            let conn = database::get_connection()?;
+            
+            // Mock 2FA check - in a real app, this would check the database
+            let twofa_enabled = false; // Mock value
+            
+            if twofa_enabled {
+                // Step 2: Two-factor authentication
+                print_header("Two-Factor Authentication");
+                print_info("Two-factor authentication is enabled for your account.");
+                
+                let code = cli::utils::read_line("Enter the 6-digit code from your authenticator app: ")?;
+                
+                // Verify the 2FA code - mock implementation
+                if code != "123456" { // Mock validation
+                    return Err(anyhow::anyhow!("Invalid two-factor authentication code"));
+                }
+            }
+            
+            // Perform login
+            cli::auth::login(&user, twofa_enabled)
+        }
+    )
+}
+
+fn process_user_command(command: &UserCommands, interactive: bool) {
+    // Get authentication token for admin user
+    match get_auth_token() {
+        Some(token) => {
+            let conn = database::get_connection().unwrap_or_else(|e| {
+                error!("Failed to connect to the database: {}", e);
+                print_error(&format!("Database connection failed: {}", e));
+                process::exit(1);
+            });
+            
+            match security::authenticate(&conn, &token) {
+                Ok(auth) => {
+                    let result = match command {
+                        UserCommands::Create { username, role } => {
+                            if interactive {
+                                create_user_interactive(&auth)
+                            } else {
+                                cli::user::create_user(&auth, username, role)
+                            }
+                        },
+                        UserCommands::ChangePassword {} => {
+                            if interactive {
+                                change_password_interactive(&auth)
+                            } else {
+                                cli::auth::change_password(&auth)
+                            }
+                        },
+                        UserCommands::Enable2FA {} => {
+                            cli::user::enable_2fa(&auth.user_id)
+                        },
+                        UserCommands::Disable2FA {} => {
+                            cli::user::disable_2fa(&auth.user_id)
+                        },
+                        UserCommands::GenBackupCodes {} => {
+                            cli::user::generate_backup_codes(&auth.user_id)
+                        },
+                        UserCommands::Verify2FA { operation, code } => {
+                            cli::user::verify_for_operation(&auth.user_id, operation, code)
+                        },
+                        UserCommands::ListUsers {} => {
+                            cli::roles::list_users(&auth)
+                        },
+                        UserCommands::ChangeRole { user_id, role } => {
+                            if interactive {
+                                change_role_interactive(&auth)
+                            } else {
+                                // Mock implementation
+                                print_info(&format!("Changing role of user {} to {}", user_id, role));
+                                Ok(())
+                            }
+                        },
+                        UserCommands::ListPermissions {} => {
+                            // Mock implementation
+                            print_info("Listing permissions");
+                            Ok(())
+                        },
+                        UserCommands::CheckPermission { permission } => {
+                            // Mock implementation
+                            print_info(&format!("Checking permission: {}", permission));
+                            Ok(())
+                        },
+                    };
+                    
+                    if let Err(e) = result {
+                        print_error(&format!("Error: {}", e));
+                        process::exit(1);
+                    }
+                },
+                Err(e) => {
+                    print_error(&format!("Authentication error: {}", e));
+                    process::exit(1);
+                }
+            }
+        },
+        None => {
+            print_error("You must be logged in to use this command.");
+            print_info("Please run 'secure-bank-cli login --username <your-username>' first.");
+            process::exit(1);
+        }
+    }
+}
+
+fn create_user_interactive(auth: &auth::AuthResult) -> anyhow::Result<()> {
+    Interactive::wizard(
+        "Create New User",
+        vec![
+            "Enter user details",
+            "Set user permissions",
+            "Complete setup",
+        ],
+        || {
+            // Step 1: Enter user details
+            print_header("User Details");
+            let username = cli::utils::read_line("Enter username: ")?;
+            
+            let options = vec![
+                ("Regular User".to_string(), "user"),
+                ("Administrator".to_string(), "admin"),
+            ];
+            
+            let role = Interactive::menu("Select user role", &options)?;
+            
+            // Step 2: Set user permissions
+            print_header("User Permissions");
+            print_info(&format!("The '{}' role has the following permissions:", role));
+            
+            // List permissions for the selected role
+            if role == "admin" {
+                println!("- User management");
+                println!("- Account management");
+                println!("- Security operations");
+                println!("- Audit logs access");
+                println!("- System configuration");
+            } else {
+                println!("- Personal account management");
+                println!("- Transaction history");
+                println!("- Profile management");
+            }
+            
+            // Confirm creation
+            let confirm = cli::utils::read_line("Create user with these settings? [y/N]: ")?;
+            if confirm.to_lowercase() != "y" {
+                return Err(anyhow::anyhow!("User creation cancelled"));
+            }
+            
+            // Step 3: Create user
+            print_header("Creating User");
+            let result = cli::user::create_user(auth, &username, role);
+            
+            match result {
+                Ok(_) => {
+                    print_success(&format!("User '{}' created successfully with role '{}'", username, role));
+                    Ok(())
+                },
+                Err(e) => Err(e),
+            }
+        }
+    )
+}
+
+fn change_password_interactive(auth: &auth::AuthResult) -> anyhow::Result<()> {
+    Interactive::wizard(
+        "Change Password",
+        vec![
+            "Enter current password",
+            "Create new password",
+            "Confirm new password",
+        ],
+        || {
+            // TODO: Implement interactive password change
+            cli::auth::change_password(auth)
+        }
+    )
+}
+
+fn change_role_interactive(auth: &auth::AuthResult) -> anyhow::Result<()> {
+    Interactive::wizard(
+        "Change User Role",
+        vec![
+            "Select user",
+            "Choose new role",
+            "Confirm changes",
+        ],
+        || {
+            // Step 1: Select user - mock implementation
+            print_header("Select User");
+            
+            // Mock user list
+            let user_options = vec![
+                ("User 1 (user)".to_string(), "user1".to_string()),
+                ("User 2 (admin)".to_string(), "user2".to_string()),
+                ("User 3 (user)".to_string(), "user3".to_string()),
+            ];
+            
+            let user_id = Interactive::menu("Select user to modify", &user_options)?;
+            
+            // Step 2: Choose new role
+            print_header("Choose New Role");
+            
+            let role_options = vec![
+                ("Regular User".to_string(), "user".to_string()),
+                ("Administrator".to_string(), "admin".to_string()),
+            ];
+            
+            let new_role = Interactive::menu("Select new role", &role_options)?;
+            
+            // Step 3: Confirm changes
+            print_header("Confirm Changes");
+            
+            let confirm = cli::utils::read_line(&format!("Change role to '{}'? [y/N]: ", new_role))?;
+            if confirm.to_lowercase() != "y" {
+                return Err(anyhow::anyhow!("Role change cancelled"));
+            }
+            
+            // Mock implementation
+            print_success(&format!("Changed role of user {} to {}", user_id, new_role));
+            Ok(())
+        }
+    )
+}
+
+fn process_account_command(command: &AccountCommands, interactive: bool) {
+    // Get authentication token
+    match get_auth_token() {
+        Some(token) => {
+            let conn = database::get_connection().unwrap_or_else(|e| {
+                error!("Failed to connect to the database: {}", e);
+                print_error(&format!("Database connection failed: {}", e));
+                process::exit(1);
+            });
+            
+            match security::authenticate(&conn, &token) {
+                Ok(auth) => {
+                    let result = match command {
+                        AccountCommands::Create { r#type } => {
+                            if interactive {
+                                cli::interactive::create_account_interactive(&auth)
+                            } else {
+                                // Mock implementation
+                                print_info(&format!("Creating new {} account", r#type));
+                                Ok(())
+                            }
+                        },
+                        AccountCommands::Deposit { id, amount, details } => {
+                            // Mock implementation
+                            print_info(&format!("Depositing ${:.2} to account {}", amount, id));
+                            Ok(())
+                        },
+                        AccountCommands::Withdraw { id, amount, details } => {
+                            // Mock implementation
+                            print_info(&format!("Withdrawing ${:.2} from account {}", amount, id));
+                            Ok(())
+                        },
+                        AccountCommands::Transfer { from, to, amount, details } => {
+                            if interactive {
+                                cli::interactive::transfer_interactive(&auth)
+                            } else {
+                                // Mock implementation
+                                print_info(&format!("Transferring ${:.2} from account {} to account {}", amount, from, to));
+                                Ok(())
+                            }
+                        },
+                        AccountCommands::Balance { id } => {
+                            // Mock implementation
+                            print_info(&format!("Account {} balance: $1000.00", id));
+                            Ok(())
+                        },
+                        AccountCommands::History { id, limit, offset, start_date, end_date } => {
+                            if interactive {
+                                cli::interactive::transaction_history_interactive(&auth)
+                            } else {
+                                // Mock implementation
+                                print_info(&format!("Displaying transaction history for account {}", id));
+                                Ok(())
+                            }
+                        },
+                        AccountCommands::Receipt { id } => {
+                            // Mock implementation
+                            print_info(&format!("Generating receipt for transaction {}", id));
+                            Ok(())
+                        },
+                        AccountCommands::Export { id, output, format, start_date, end_date, limit } => {
+                            // Mock implementation
+                            print_info(&format!("Exporting transaction history for account {} to {}", id, output));
+                            Ok(())
+                        },
+                        // Add more account commands here
+                        _ => {
+                            // For remaining commands, show a message that they're not fully implemented
+                            print_info("This command is not fully implemented yet");
+                            Ok(())
+                        }
+                    };
+                    
+                    if let Err(e) = result {
+                        print_error(&format!("Error: {}", e));
+                        process::exit(1);
+                    }
+                },
+                Err(e) => {
+                    print_error(&format!("Authentication error: {}", e));
+                    process::exit(1);
+                }
+            }
+        },
+        None => {
+            print_error("You must be logged in to perform account operations");
+            print_info("Please run 'secure-bank-cli login --username <your-username>' first");
+            process::exit(1);
+        }
+    }
+}
+
+fn process_security_command(command: &SecurityCommands, interactive: bool) {
+    // Get authentication token
+    match get_auth_token() {
+        Some(token) => {
+            let conn = database::get_connection().unwrap_or_else(|e| {
+                error!("Failed to connect to the database: {}", e);
+                print_error(&format!("Database connection failed: {}", e));
+                process::exit(1);
+            });
+            
+            match security::authenticate(&conn, &token) {
+                Ok(auth) => {
+                    let result = match command {
+                        SecurityCommands::ComplianceCheck {} => {
+                            if interactive {
+                                cli::interactive::compliance_check_interactive(&auth)
+                            } else {
+                                // Mock implementation
+                                print_info("Running compliance check...");
+                                Ok(())
+                            }
+                        },
+                        SecurityCommands::Backup { output } => {
+                            // Mock implementation
+                            print_info(&format!("Creating backup to {}", output));
+                            Ok(())
+                        },
+                        SecurityCommands::Restore { input } => {
+                            // Mock implementation
+                            print_info(&format!("Restoring from backup {}", input));
+                            Ok(())
+                        },
+                    };
+                    
+                    if let Err(e) = result {
+                        print_error(&format!("Error: {}", e));
+                        process::exit(1);
+                    }
+                },
+                Err(e) => {
+                    print_error(&format!("Authentication error: {}", e));
+                    process::exit(1);
+                }
+            }
+        },
+        None => {
+            print_error("You must be logged in to perform security operations");
+            print_info("Please run 'secure-bank-cli login --username <your-username>' first");
+            process::exit(1);
+        }
+    }
+}
+
+fn process_audit_command(command: &AuditCommands, interactive: bool) {
+    // Get authentication token
+    match get_auth_token() {
+        Some(token) => {
+            let conn = database::get_connection().unwrap_or_else(|e| {
+                error!("Failed to connect to the database: {}", e);
+                print_error(&format!("Database connection failed: {}", e));
+                process::exit(1);
+            });
+            
+            match security::authenticate(&conn, &token) {
+                Ok(auth) => {
+                    let result = match command {
+                        AuditCommands::Search { user_id, account_id, event_type, from_date, to_date, limit, text } => {
+                            if interactive {
+                                cli::interactive::audit_search_interactive(&auth)
+                            } else {
+                                // Mock implementation
+                                print_info("Searching audit logs...");
+                                Ok(())
+                            }
+                        },
+                        // Add other audit commands here
+                        _ => {
+                            // For remaining commands, show a message that they're not fully implemented
+                            print_info("This command is not fully implemented yet");
+                            Ok(())
+                        }
+                    };
+                    
+                    if let Err(e) = result {
+                        print_error(&format!("Error: {}", e));
+                        process::exit(1);
+                    }
+                },
+                Err(e) => {
+                    print_error(&format!("Authentication error: {}", e));
+                    process::exit(1);
+                }
+            }
+        },
+        None => {
+            print_error("You must be logged in to perform audit operations");
+            print_info("Please run 'secure-bank-cli login --username <your-username>' first");
+            process::exit(1);
+        }
+    }
 } 

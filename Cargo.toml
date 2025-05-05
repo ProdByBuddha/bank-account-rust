@@ -26,6 +26,7 @@ pbkdf2 = "0.12"
 hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.21"
+hex = "0.4"
 
 # JWT and JOSE
 jsonwebtoken = "9.1"

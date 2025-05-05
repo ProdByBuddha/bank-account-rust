@@ -387,17 +387,60 @@ enum SecurityCommands {
     
     /// Create an encrypted backup
     Backup {
-        /// Output file
+        /// Output file path (optional, uses default if not specified)
         #[clap(short, long)]
-        output: String,
+        output: Option<String>,
+        
+        /// Description for the backup
+        #[clap(short, long)]
+        description: Option<String>,
     },
     
-    /// Restore from an encrypted backup
+    /// Restore from a backup
     Restore {
-        /// Input file
+        /// Backup ID to restore
         #[clap(short, long)]
-        input: String,
+        id: String,
+        
+        /// Force restore without confirmation (use with caution)
+        #[clap(short, long)]
+        force: bool,
     },
+    
+    /// List available backups
+    ListBackups {},
+    
+    /// Verify a backup's integrity
+    VerifyBackup {
+        /// Backup ID to verify
+        #[clap(short, long)]
+        id: String,
+    },
+    
+    /// Delete a backup
+    DeleteBackup {
+        /// Backup ID to delete
+        #[clap(short, long)]
+        id: String,
+        
+        /// Force deletion without confirmation
+        #[clap(short, long)]
+        force: bool,
+    },
+    
+    /// Perform a partial restore of specific tables
+    PartialRestore {
+        /// Backup ID to restore from
+        #[clap(short, long)]
+        id: String,
+        
+        /// Comma-separated list of tables to restore
+        #[clap(short, long)]
+        tables: String,
+    },
+    
+    /// Schedule an automatic backup
+    ScheduleBackup {},
 }
 
 #[derive(Subcommand)]
@@ -1008,15 +1051,38 @@ fn process_security_command(command: &SecurityCommands, interactive: bool) {
                                 Ok(())
                             }
                         },
-                        SecurityCommands::Backup { output } => {
-                            // Mock implementation
-                            print_info(&format!("Creating backup to {}", output));
-                            Ok(())
+                        SecurityCommands::Backup { output, description } => {
+                            if interactive {
+                                cli::security::backup_interactive(&auth)
+                            } else {
+                                cli::security::create_backup(&auth, output.as_deref(), description.as_deref())
+                            }
                         },
-                        SecurityCommands::Restore { input } => {
-                            // Mock implementation
-                            print_info(&format!("Restoring from backup {}", input));
-                            Ok(())
+                        SecurityCommands::Restore { id, force } => {
+                            if interactive {
+                                cli::security::restore_interactive(&auth)
+                            } else {
+                                cli::security::restore_backup(&auth, id, *force)
+                            }
+                        },
+                        SecurityCommands::ListBackups {} => {
+                            cli::security::list_backups(&auth)
+                        },
+                        SecurityCommands::VerifyBackup { id } => {
+                            cli::security::verify_backup(&auth, id)
+                        },
+                        SecurityCommands::DeleteBackup { id, force } => {
+                            cli::security::delete_backup(&auth, id, *force)
+                        },
+                        SecurityCommands::PartialRestore { id, tables } => {
+                            if interactive {
+                                cli::security::partial_restore_interactive(&auth)
+                            } else {
+                                cli::security::partial_restore(&auth, id, tables)
+                            }
+                        },
+                        SecurityCommands::ScheduleBackup {} => {
+                            cli::security::schedule_backup(&auth)
                         },
                     };
                     

@@ -72,6 +72,28 @@ impl AuthResult {
         })
     }
     
+    /// Check if the user has a specific permission by name
+    pub fn has_permission(&self, permission_name: &str) -> bool {
+        // Admins have all permissions
+        if self.is_admin {
+            return true;
+        }
+        
+        // For non-admins, check the specific permission
+        match permission_name {
+            // Backup permissions - only admins have these by default
+            "backup_create" | "backup_restore" | "backup_list" | 
+            "backup_verify" | "backup_delete" | "backup_schedule" => false,
+            
+            // Default user permissions
+            "view_account" | "deposit" | "withdraw" | 
+            "transfer" | "view_transactions" => true,
+            
+            // All other permissions require admin
+            _ => false,
+        }
+    }
+    
     /// Create a new AuthResult for testing purposes
     #[cfg(test)]
     pub fn for_test(

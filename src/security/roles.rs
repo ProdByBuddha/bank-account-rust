@@ -35,7 +35,14 @@ pub enum Permission {
     ViewAuditLogs,
     ConfigureSystem,
     RunComplianceChecks,
+    
+    // Backup and restore permissions
+    BackupCreate,
     BackupRestore,
+    BackupList,
+    BackupVerify,
+    BackupDelete,
+    BackupSchedule,
 }
 
 impl Permission {
@@ -61,7 +68,13 @@ impl Permission {
             Permission::ViewAuditLogs => "view_audit_logs",
             Permission::ConfigureSystem => "configure_system",
             Permission::RunComplianceChecks => "run_compliance_checks",
+            
+            Permission::BackupCreate => "backup_create",
             Permission::BackupRestore => "backup_restore",
+            Permission::BackupList => "backup_list",
+            Permission::BackupVerify => "backup_verify",
+            Permission::BackupDelete => "backup_delete",
+            Permission::BackupSchedule => "backup_schedule",
         }
     }
     
@@ -87,6 +100,15 @@ impl Permission {
             "view_audit_logs" => Ok(Permission::ViewAuditLogs),
             "configure_system" => Ok(Permission::ConfigureSystem),
             "run_compliance_checks" => Ok(Permission::RunComplianceChecks),
+            
+            "backup_create" => Ok(Permission::BackupCreate),
+            "backup_restore" => Ok(Permission::BackupRestore),
+            "backup_list" => Ok(Permission::BackupList),
+            "backup_verify" => Ok(Permission::BackupVerify),
+            "backup_delete" => Ok(Permission::BackupDelete),
+            "backup_schedule" => Ok(Permission::BackupSchedule),
+            
+            // Legacy permission mapping for backward compatibility
             "backup_restore" => Ok(Permission::BackupRestore),
             
             _ => Err(format!("Unknown permission: {}", s)),
@@ -166,7 +188,14 @@ pub fn get_default_permissions() -> HashMap<UserRole, Vec<Permission>> {
         Permission::ViewAuditLogs,
         Permission::ConfigureSystem,
         Permission::RunComplianceChecks,
+        
+        // Backup and restore permissions
+        Permission::BackupCreate,
         Permission::BackupRestore,
+        Permission::BackupList,
+        Permission::BackupVerify,
+        Permission::BackupDelete,
+        Permission::BackupSchedule,
     ]);
     
     permissions

@@ -102,6 +102,30 @@ enum UserCommands {
         #[arg(long, short = 'c')]
         code: String,
     },
+    
+    /// List all users and their roles
+    ListUsers {},
+    
+    /// Change a user's role
+    ChangeRole {
+        /// User ID to change role for
+        #[clap(long)]
+        user_id: String,
+        
+        /// New role (admin or user)
+        #[clap(long)]
+        role: String,
+    },
+    
+    /// List all available permissions for each role
+    ListPermissions {},
+    
+    /// Check if the current user has a specific permission
+    CheckPermission {
+        /// Permission to check
+        #[clap(long)]
+        permission: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -240,7 +264,7 @@ fn main() {
             println!("Logging in as user: {}", username);
             
             match cli::auth::login(username, *twofa) {
-                Ok(_) => {},
+                Ok(auth) => {},
                 Err(err) => {
                     error!("Error logging in: {}", err);
                     process::exit(1);
@@ -294,7 +318,7 @@ fn main() {
                     }
                 }
                 UserCommands::Verify2FA { operation, code } => {
-                    let user_id = auth_result.user_id.clone();
+                    let user_id = auth.user_id.clone();
                     
                     match cli::user::verify_for_operation(&user_id, &operation, &code) {
                         Ok(()) => {
@@ -303,6 +327,89 @@ fn main() {
                         Err(err) => {
                             error!("Error verifying 2FA: {}", err);
                             std::process::exit(1);
+                        }
+                    }
+                }
+                UserCommands::ListUsers {} => {
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::roles::list_users(&auth) {
+                                        println!("Error listing users: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to list users.");
+                            process::exit(1);
+                        }
+                    }
+                },
+                UserCommands::ChangeRole { user_id, role } => {
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::roles::change_user_role(&auth, &user_id, &role) {
+                                        println!("Error changing user role: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to change user roles.");
+                            process::exit(1);
+                        }
+                    }
+                },
+                UserCommands::ListPermissions {} => {
+                    if let Err(e) = cli::roles::list_permissions() {
+                        println!("Error listing permissions: {}", e);
+                    }
+                },
+                UserCommands::CheckPermission { permission } => {
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::roles::check_permission(&auth, &permission) {
+                                        println!("Error checking permission: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to check permissions.");
+                            process::exit(1);
                         }
                     }
                 }

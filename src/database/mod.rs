@@ -532,31 +532,26 @@ pub fn update_last_login(conn: &Connection, user_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Add audit log entry
-fn add_audit_log(
+/// Add an audit log entry
+pub fn add_audit_log(
     conn: &Connection,
     event_type: &str,
     user_id: Option<&str>,
     details: Option<&str>
 ) -> Result<()> {
-    let now = Utc::now();
     let audit_id = uuid::Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
     
     conn.execute(
-        "INSERT INTO audit_logs (
-            id, event_type, user_id, details, timestamp, created_at
-        ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6
-        )",
-        params![
-            audit_id,
-            event_type,
-            user_id,
-            details,
-            now.to_rfc3339(),
-            now.to_rfc3339(),
-        ]
-    ).context("Failed to add audit log entry")?;
+        "INSERT INTO audit_logs (id, event_type, user_id, details, timestamp)
+        VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![audit_id, event_type, user_id, details, now]
+    ).context("Failed to insert audit log")?;
     
     Ok(())
+}
+
+/// Alias for get_connection for better code readability
+pub fn connect() -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
+    get_connection()
 } 

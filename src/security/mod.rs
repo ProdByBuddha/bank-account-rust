@@ -15,6 +15,7 @@ pub mod encryption;  // New encryption module with enhanced key management
 pub mod auth;  // New authentication middleware module
 pub mod trusted_devices;  // New module for trusted device management
 pub mod sensitive; // New module for sensitive operations
+pub mod roles; // New module for role-based access control
 
 // Re-export key functions from encryption module
 pub use encryption::{
@@ -60,6 +61,16 @@ pub use sensitive::{
     verify_for_sensitive_operation,
     require_verification_for_operation,
     has_recent_verification,
+};
+
+// Re-export role-based access control functions
+pub use roles::{
+    Permission,
+    RbacError,
+    has_permission,
+    require_permission,
+    change_user_role,
+    is_last_admin,
 };
 
 // Length of the AES-256 key

@@ -6,6 +6,7 @@ use std::fmt;
 
 use crate::database::models::UserRole;
 use crate::security::jwt::{self, validate_token_with_db, Claims};
+use crate::security::roles::{Permission, RbacError, has_permission};
 
 /// Authentication errors
 #[derive(Debug)]
@@ -153,6 +154,18 @@ pub fn require_role(
     Ok(())
 }
 
+/// Check if a user has the required permission
+pub fn require_permission(
+    auth_result: &AuthResult,
+    permission: Permission,
+) -> Result<(), AuthError> {
+    if !has_permission(auth_result, permission) {
+        return Err(AuthError::InsufficientPermissions);
+    }
+    
+    Ok(())
+}
+
 /// Check if two-factor authentication is verified
 pub fn require_tfa(auth_result: &AuthResult) -> Result<(), AuthError> {
     if !auth_result.has_verified_tfa() {
@@ -247,30 +260,47 @@ pub fn logout_all_devices(conn: &Connection, user_id: &str) -> Result<usize, Aut
     }
 }
 
+// Implement conversion from RbacError to AuthError
+impl From<RbacError> for AuthError {
+    fn from(error: RbacError) -> Self {
+        match error {
+            RbacError::InsufficientPermission(_) => AuthError::InsufficientPermissions,
+            RbacError::DatabaseError(msg) => AuthError::DatabaseError(msg),
+            RbacError::RoleUpdateError(msg) => AuthError::Unknown(format!("Role update error: {}", msg)),
+            RbacError::PermissionUpdateError(msg) => AuthError::Unknown(format!("Permission update error: {}", msg)),
+            RbacError::InvalidOperation(msg) => AuthError::Unknown(format!("Invalid operation: {}", msg)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::jwt::{generate_token, TokenType};
+    use rusqlite::Connection;
     use tempfile::TempDir;
     
-    // Helper to set up a test database
     fn setup_test_db() -> (Connection, TempDir) {
         let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test_db.sqlite");
+        let db_path = temp_dir.path().join("test.db");
         let conn = Connection::open(&db_path).unwrap();
         
-        // Create tokens table
+        // Create a simple schema for testing
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS tokens (
+            "CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                role TEXT NOT NULL
+            )",
+            [],
+        ).unwrap();
+        
+        conn.execute(
+            "CREATE TABLE tokens (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 token_hash TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
-                revoked INTEGER NOT NULL DEFAULT 0,
-                device_info TEXT,
-                ip_address TEXT,
-                created_at TEXT NOT NULL,
-                revoked_at TEXT
+                revoked INTEGER NOT NULL DEFAULT 0
             )",
             [],
         ).unwrap();
@@ -283,11 +313,11 @@ mod tests {
         let claims = Claims {
             sub: "user123".to_string(),
             username: "testuser".to_string(),
-            role: "user".to_string(),
+            role: "admin".to_string(),
             iat: Utc::now().timestamp(),
             exp: (Utc::now() + Duration::hours(1)).timestamp(),
             jti: "token123".to_string(),
-            iss: "test_issuer".to_string(),
+            iss: "test".to_string(),
             tfa_verified: true,
             refresh: None,
         };
@@ -296,66 +326,66 @@ mod tests {
         
         assert_eq!(auth_result.user_id, "user123");
         assert_eq!(auth_result.username, "testuser");
-        assert_eq!(auth_result.role, UserRole::User);
-        assert_eq!(auth_result.tfa_verified, true);
+        assert_eq!(auth_result.role, UserRole::Admin);
         assert_eq!(auth_result.token_id, "token123");
+        assert!(auth_result.tfa_verified);
     }
     
     #[test]
     fn test_require_role() {
-        let auth_result = AuthResult {
+        let admin_auth = AuthResult {
             user_id: "user123".to_string(),
-            username: "testuser".to_string(),
-            role: UserRole::User,
+            username: "admin".to_string(),
+            role: UserRole::Admin,
             tfa_verified: true,
             token_id: "token123".to_string(),
             last_activity: Utc::now(),
         };
         
-        // Same role should succeed
-        assert!(require_role(&auth_result, &UserRole::User).is_ok());
-        
-        // Admin role should fail
-        assert!(require_role(&auth_result, &UserRole::Admin).is_err());
-        
-        // Test with admin user
-        let admin_result = AuthResult {
-            user_id: "admin123".to_string(),
-            username: "adminuser".to_string(),
-            role: UserRole::Admin,
+        let user_auth = AuthResult {
+            user_id: "user456".to_string(),
+            username: "user".to_string(),
+            role: UserRole::User,
             tfa_verified: true,
             token_id: "token456".to_string(),
             last_activity: Utc::now(),
         };
         
-        // Admin can access user role
-        assert!(require_role(&admin_result, &UserRole::User).is_ok());
+        // Admin can access admin routes
+        assert!(require_role(&admin_auth, &UserRole::Admin).is_ok());
         
-        // Admin can access admin role
-        assert!(require_role(&admin_result, &UserRole::Admin).is_ok());
+        // Admin can access user routes
+        assert!(require_role(&admin_auth, &UserRole::User).is_ok());
+        
+        // User can access user routes
+        assert!(require_role(&user_auth, &UserRole::User).is_ok());
+        
+        // User cannot access admin routes
+        assert!(require_role(&user_auth, &UserRole::Admin).is_err());
     }
     
     #[test]
     fn test_session_timeout() {
-        let now = Utc::now();
         let config = SessionTimeoutConfig {
             max_inactivity_minutes: 30,
             enforce: true,
         };
         
-        // Recent activity should be fine
-        let recent_activity = now - Duration::minutes(20);
+        let current_time = Utc::now();
+        let recent_activity = current_time - Duration::minutes(10);
+        let old_activity = current_time - Duration::minutes(60);
+        
+        // Recent activity should not time out
         assert!(check_session_timeout(&recent_activity, &config).is_ok());
         
-        // Old activity should timeout
-        let old_activity = now - Duration::minutes(40);
+        // Old activity should time out
         assert!(check_session_timeout(&old_activity, &config).is_err());
         
-        // Disabled timeout enforcement should always pass
-        let disabled_config = SessionTimeoutConfig {
+        // If timeout is not enforced, even old activity should be ok
+        let no_enforce_config = SessionTimeoutConfig {
             max_inactivity_minutes: 30,
             enforce: false,
         };
-        assert!(check_session_timeout(&old_activity, &disabled_config).is_ok());
+        assert!(check_session_timeout(&old_activity, &no_enforce_config).is_ok());
     }
 } 

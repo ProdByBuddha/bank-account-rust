@@ -23,6 +23,12 @@ pub enum SensitiveOperation {
     ChangeSecuritySettings,
     /// Performing admin actions
     AdminAction,
+    /// Creating a new account
+    CreateAccount,
+    /// Updating account status
+    UpdateAccountStatus,
+    /// Linking accounts
+    LinkAccounts,
 }
 
 impl SensitiveOperation {
@@ -35,6 +41,9 @@ impl SensitiveOperation {
             SensitiveOperation::ManageAccounts => "manage_accounts",
             SensitiveOperation::ChangeSecuritySettings => "change_security_settings",
             SensitiveOperation::AdminAction => "admin_action",
+            SensitiveOperation::CreateAccount => "create_account",
+            SensitiveOperation::UpdateAccountStatus => "update_account_status",
+            SensitiveOperation::LinkAccounts => "link_accounts",
         }
     }
     
@@ -47,6 +56,9 @@ impl SensitiveOperation {
             "manage_accounts" => Ok(SensitiveOperation::ManageAccounts),
             "change_security_settings" => Ok(SensitiveOperation::ChangeSecuritySettings),
             "admin_action" => Ok(SensitiveOperation::AdminAction),
+            "create_account" => Ok(SensitiveOperation::CreateAccount),
+            "update_account_status" => Ok(SensitiveOperation::UpdateAccountStatus),
+            "link_accounts" => Ok(SensitiveOperation::LinkAccounts),
             _ => Err(format!("Invalid sensitive operation type: {}", s)),
         }
     }
@@ -60,6 +72,9 @@ impl SensitiveOperation {
             SensitiveOperation::ManageAccounts => "Manage Account Access",
             SensitiveOperation::ChangeSecuritySettings => "Change Security Settings",
             SensitiveOperation::AdminAction => "Admin Action",
+            SensitiveOperation::CreateAccount => "Create Account",
+            SensitiveOperation::UpdateAccountStatus => "Update Account Status",
+            SensitiveOperation::LinkAccounts => "Link Accounts",
         }
     }
 }
@@ -139,6 +154,9 @@ pub fn get_required_2fa_operations(conn: &Connection) -> Result<HashSet<Sensitiv
     operations.insert(SensitiveOperation::ManageAccounts);
     operations.insert(SensitiveOperation::ChangeSecuritySettings);
     operations.insert(SensitiveOperation::AdminAction);
+    operations.insert(SensitiveOperation::CreateAccount);
+    operations.insert(SensitiveOperation::UpdateAccountStatus);
+    operations.insert(SensitiveOperation::LinkAccounts);
     
     Ok(operations)
 }

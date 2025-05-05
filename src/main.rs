@@ -191,6 +191,42 @@ enum AccountCommands {
         #[clap(short, long, default_value = "10")]
         limit: usize,
     },
+    
+    /// List all accounts
+    List {
+        /// User ID (admin only)
+        #[clap(long)]
+        user_id: Option<String>,
+    },
+    
+    /// Update account status
+    Status {
+        /// Account ID
+        #[clap(long)]
+        id: String,
+        
+        /// New status (active, suspended, closed)
+        #[clap(long)]
+        status: String,
+    },
+    
+    /// Calculate interest for a savings account
+    Interest {
+        /// Account ID
+        #[clap(long)]
+        id: String,
+    },
+    
+    /// Link accounts
+    Link {
+        /// Primary account ID
+        #[clap(long)]
+        primary: String,
+        
+        /// Comma-separated list of account IDs to link
+        #[clap(long)]
+        accounts: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -211,6 +247,21 @@ enum SecurityCommands {
         #[clap(short, long)]
         input: String,
     },
+}
+
+// Get authentication token (placeholder function)
+// In a real application, this would retrieve the stored token
+fn get_auth_token() -> Option<String> {
+    // In a real application, you would retrieve the token from:
+    // - Secure storage (keychain, encrypted file, etc.)
+    // - Environment variables
+    // - Memory during the current session
+    
+    // For this example, we'll simulate a token
+    // This is just a placeholder - in a real app, the token would be retrieved securely
+    
+    // TODO: Implement proper token retrieval from secure storage
+    Some("dummy_token".to_string())
 }
 
 fn main() {
@@ -418,29 +469,302 @@ fn main() {
         Commands::Account { command } => {
             match command {
                 AccountCommands::Create { r#type } => {
-                    println!("Creating new account of type: {}", r#type);
-                    // TODO: Implement account creation
-                }
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::account::create_new_account(&auth, r#type) {
+                                        println!("Error creating account: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to create an account.");
+                            process::exit(1);
+                        }
+                    }
+                },
                 AccountCommands::Deposit { id, amount } => {
-                    println!("Depositing ${:.2} into account: {}", amount, id);
-                    // TODO: Implement deposit
-                }
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    // Using the process_transaction function from account module
+                                    match crate::account::process_transaction(
+                                        &conn, 
+                                        &auth, 
+                                        id, 
+                                        crate::database::models::TransactionType::Deposit, 
+                                        *amount,
+                                        None
+                                    ) {
+                                        Ok(transaction) => {
+                                            println!("✅ Deposit successful!");
+                                            println!("Transaction ID: {}", transaction.id);
+                                            println!("Amount: ${:.2}", transaction.amount);
+                                            println!("New balance: ${:.2}", 
+                                                match crate::account::get_account(&conn, &auth, id) {
+                                                    Ok(account) => account.balance,
+                                                    Err(_) => 0.0, // Shouldn't happen
+                                                }
+                                            );
+                                        },
+                                        Err(e) => {
+                                            println!("Error processing deposit: {}", e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to make a deposit.");
+                            process::exit(1);
+                        }
+                    }
+                },
                 AccountCommands::Withdraw { id, amount } => {
-                    println!("Withdrawing ${:.2} from account: {}", amount, id);
-                    // TODO: Implement withdrawal
-                }
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    // Using the process_transaction function from account module
+                                    match crate::account::process_transaction(
+                                        &conn, 
+                                        &auth, 
+                                        id, 
+                                        crate::database::models::TransactionType::Withdrawal, 
+                                        *amount,
+                                        None
+                                    ) {
+                                        Ok(transaction) => {
+                                            println!("✅ Withdrawal successful!");
+                                            println!("Transaction ID: {}", transaction.id);
+                                            println!("Amount: ${:.2}", transaction.amount);
+                                            println!("New balance: ${:.2}", 
+                                                match crate::account::get_account(&conn, &auth, id) {
+                                                    Ok(account) => account.balance,
+                                                    Err(_) => 0.0, // Shouldn't happen
+                                                }
+                                            );
+                                        },
+                                        Err(e) => {
+                                            println!("Error processing withdrawal: {}", e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to make a withdrawal.");
+                            process::exit(1);
+                        }
+                    }
+                },
                 AccountCommands::Transfer { from, to, amount } => {
-                    println!("Transferring ${:.2} from account: {} to account: {}", amount, from, to);
-                    // TODO: Implement transfer
-                }
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    // Using the transfer_funds function from account module
+                                    match crate::account::transfer_funds(
+                                        &conn, 
+                                        &auth, 
+                                        from, 
+                                        to, 
+                                        *amount,
+                                        None
+                                    ) {
+                                        Ok(transaction) => {
+                                            println!("✅ Transfer successful!");
+                                            println!("Transaction ID: {}", transaction.id);
+                                            println!("Amount: ${:.2}", transaction.amount);
+                                            println!("From account: {}", from);
+                                            println!("To account: {}", to);
+                                        },
+                                        Err(e) => {
+                                            println!("Error processing transfer: {}", e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to make a transfer.");
+                            process::exit(1);
+                        }
+                    }
+                },
                 AccountCommands::Balance { id } => {
-                    println!("Getting balance for account: {}", id);
-                    // TODO: Implement balance check
-                }
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::account::get_account_details(&auth, id) {
+                                        println!("Error getting account balance: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to view account balance.");
+                            process::exit(1);
+                        }
+                    }
+                },
                 AccountCommands::History { id, limit } => {
-                    println!("Getting transaction history for account: {} (limit: {})", id, limit);
-                    // TODO: Implement history view
-                }
+                    println!("Viewing transaction history for account: {} (limit: {})", id, limit);
+                    // TODO: Implement transaction history
+                },
+                AccountCommands::List { user_id } => {
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::account::list_accounts(&auth, user_id) {
+                                        println!("Error listing accounts: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to list accounts.");
+                            process::exit(1);
+                        }
+                    }
+                },
+                AccountCommands::Status { id, status } => {
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::account::update_status(&auth, &id, &status) {
+                                        println!("Error updating account status: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to update account status.");
+                            process::exit(1);
+                        }
+                    }
+                },
+                AccountCommands::Interest { id } => {
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::account::calc_interest(&auth, &id) {
+                                        println!("Error calculating interest: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to calculate interest.");
+                            process::exit(1);
+                        }
+                    }
+                },
+                AccountCommands::Link { primary, accounts } => {
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::account::link_user_accounts(&auth, &primary, &accounts) {
+                                        println!("Error linking accounts: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to link accounts.");
+                            process::exit(1);
+                        }
+                    }
+                },
             }
         }
         Commands::Security { command } => {

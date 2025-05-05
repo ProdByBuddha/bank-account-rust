@@ -36,7 +36,7 @@ pub fn enable_2fa(user_id: &str) -> Result<()> {
 fn setup_2fa(conn: &Connection, user_id: &str) -> Result<()> {
     // Begin 2FA enrollment
     let uri = match two_factor::enable_2fa(conn, user_id) {
-        Ok(uri) => uri,
+        Ok(uri_string) => uri_string,
         Err(TwoFactorError::AlreadyEnabled) => {
             return Err(anyhow!("Two-factor authentication is already enabled for your account"));
         },
@@ -68,9 +68,9 @@ fn setup_2fa(conn: &Connection, user_id: &str) -> Result<()> {
         }
         
         match two_factor::verify_2fa_setup(conn, user_id, &code) {
-            Ok(recovery_codes) => {
+            Ok(recovery_codes_vec) => {
                 // Display the recovery codes
-                display_recovery_codes(&recovery_codes)?;
+                display_recovery_codes(&recovery_codes_vec)?;
                 return Ok(());
             },
             Err(TwoFactorError::InvalidCode) => {
@@ -134,9 +134,9 @@ pub fn generate_backup_codes(user_id: &str) -> Result<()> {
     
     // Generate new backup codes
     match two_factor::generate_backup_codes(&conn, user_id) {
-        Ok(recovery_codes) => {
+        Ok(recovery_codes_vec) => {
             // Display the recovery codes
-            display_recovery_codes(&recovery_codes)?;
+            display_recovery_codes(&recovery_codes_vec)?;
             println!("\n✅ New backup codes have been generated.");
             Ok(())
         },

@@ -81,7 +81,7 @@ pub fn display_recovery_codes(codes: &[String]) -> Result<()> {
     println!("\nPlease save these codes immediately. They won't be shown again!\n");
     
     // Ask for confirmation
-    let confirmation = read_line("Press Enter when you have saved these codes...")?;
+    let _confirmation = read_line("Press Enter when you have saved these codes...")?;
     
     Ok(())
 } 

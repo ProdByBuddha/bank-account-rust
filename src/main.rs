@@ -229,6 +229,33 @@ enum AccountCommands {
         id: String,
     },
     
+    /// Export transaction history to a file
+    Export {
+        /// Account ID
+        #[clap(long)]
+        id: String,
+        
+        /// Output file path
+        #[clap(short, long)]
+        output: String,
+        
+        /// Export format (csv or json)
+        #[clap(short, long, default_value = "csv")]
+        format: String,
+        
+        /// Start date (YYYY-MM-DD)
+        #[clap(long)]
+        start_date: Option<String>,
+        
+        /// End date (YYYY-MM-DD)
+        #[clap(long)]
+        end_date: Option<String>,
+        
+        /// Maximum number of transactions to export
+        #[clap(long, default_value = "1000")]
+        limit: usize,
+    },
+    
     /// Schedule a future transaction
     Schedule {
         /// Account ID
@@ -862,12 +889,63 @@ fn main() {
                     }
                 },
                 AccountCommands::History { id, limit, offset, start_date, end_date } => {
-                    println!("Viewing transaction history for account: {} (limit: {}, offset: {}, start_date: {}, end_date: {})", id, limit, offset, start_date.as_deref().unwrap_or("None"), end_date.as_deref().unwrap_or("None"));
-                    // TODO: Implement transaction history
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth_result) => {
+                                    if let Err(e) = cli::account::display_transaction_history(
+                                        &auth_result, 
+                                        &id, 
+                                        limit, 
+                                        offset, 
+                                        start_date.as_deref(), 
+                                        end_date.as_deref()
+                                    ) {
+                                        println!("Error viewing transaction history: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to view transaction history.");
+                            process::exit(1);
+                        }
+                    }
                 },
                 AccountCommands::Receipt { id } => {
-                    println!("Getting transaction receipt for transaction: {}", id);
-                    // TODO: Implement receipt retrieval
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth_result) => {
+                                    if let Err(e) = cli::account::get_transaction_receipt(&auth_result, &id) {
+                                        println!("Error retrieving transaction receipt: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to view transaction receipts.");
+                            process::exit(1);
+                        }
+                    }
                 },
                 AccountCommands::Schedule { id, r#type, amount, date, to, details } => {
                     println!("Scheduling transaction: {} {} {} {} {} {}", id, r#type, amount, date, to.as_deref().unwrap_or("None"), details.as_deref().unwrap_or("None"));
@@ -989,6 +1067,40 @@ fn main() {
                         },
                         None => {
                             println!("You must be logged in to link accounts.");
+                            process::exit(1);
+                        }
+                    }
+                },
+                AccountCommands::Export { id, output, format, start_date, end_date, limit } => {
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth_result) => {
+                                    if let Err(e) = cli::account::export_transaction_history(
+                                        &auth_result, 
+                                        &id, 
+                                        &format, 
+                                        &output, 
+                                        start_date.as_deref(), 
+                                        end_date.as_deref(),
+                                        limit
+                                    ) {
+                                        println!("Error exporting transaction history: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to export transaction history.");
                             process::exit(1);
                         }
                     }

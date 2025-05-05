@@ -17,6 +17,14 @@ pub struct DatabaseConfig {
     pub kdf_iterations: Option<u32>,
     /// Maximum number of connections in the connection pool
     pub max_connections: u32,
+    /// Path to store database backups
+    pub backup_dir: String,
+    /// Whether to encrypt backups
+    pub encrypt_backups: bool,
+    /// Maximum number of backups to keep (for retention policy)
+    pub max_backups: Option<usize>,
+    /// Automatic backup schedule (in hours, 0 to disable)
+    pub backup_schedule_hours: Option<u32>,
 }
 
 /// Security configuration
@@ -82,6 +90,10 @@ impl Default for Config {
                 encrypt: true,
                 kdf_iterations: Some(10000),
                 max_connections: 10,
+                backup_dir: "data/backups".to_string(),
+                encrypt_backups: true,
+                max_backups: Some(10),
+                backup_schedule_hours: Some(24),
             },
             security: SecurityConfig {
                 jwt_secret: "change_me_in_production".to_string(),

@@ -16,6 +16,7 @@ use crate::security;
 mod schema;
 pub mod models;
 mod migrations;
+pub mod backup;
 #[cfg(test)]
 mod tests;
 
@@ -554,4 +555,16 @@ pub fn add_audit_log(
 /// Alias for get_connection for better code readability
 pub fn connect() -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
     get_connection()
+}
+
+/// Close all database connections
+pub fn close_all_connections() -> Result<()> {
+    // Acquire write lock to replace the pool
+    let mut pool_guard = DB_POOL.write().unwrap();
+    
+    // Drop the existing pool if it exists
+    *pool_guard = None;
+    
+    debug!("All database connections closed");
+    Ok(())
 } 

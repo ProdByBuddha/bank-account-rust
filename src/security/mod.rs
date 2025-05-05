@@ -12,6 +12,7 @@ pub mod totp;
 pub mod compliance;
 pub mod password;
 pub mod encryption;  // New encryption module with enhanced key management
+pub mod auth;  // New authentication middleware module
 
 // Re-export key functions from encryption module
 pub use encryption::{
@@ -22,6 +23,20 @@ pub use encryption::{
     hash_sha256,
     hash_sha512,
     generate_random_bytes,
+};
+
+// Re-export key authentication functions
+pub use auth::{
+    authenticate,
+    require_role,
+    require_tfa,
+    check_session_timeout,
+    refresh_if_needed,
+    logout,
+    logout_all_devices,
+    AuthResult,
+    AuthError,
+    SessionTimeoutConfig,
 };
 
 // Length of the AES-256 key

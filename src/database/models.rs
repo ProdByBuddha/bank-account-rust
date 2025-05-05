@@ -341,4 +341,41 @@ impl AuditLog {
             timestamp: Utc::now(),
         }
     }
+}
+
+/// Token model for authentication tokens
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Token {
+    pub id: String,
+    pub user_id: String,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub revoked: bool,
+    pub device_info: Option<String>,
+    pub ip_address: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+impl Token {
+    pub fn new(
+        user_id: String,
+        token_hash: String,
+        expires_at: DateTime<Utc>,
+        device_info: Option<String>,
+        ip_address: Option<String>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            user_id,
+            token_hash,
+            expires_at,
+            revoked: false,
+            device_info,
+            ip_address,
+            created_at: now,
+            revoked_at: None,
+        }
+    }
 } 

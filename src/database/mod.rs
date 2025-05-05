@@ -6,6 +6,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 use lazy_static::lazy_static;
 use log::{info, error, debug, warn};
+use chrono::{DateTime, Utc};
+use sha2::{Digest, Sha256};
 
 use crate::config;
 use crate::security;
@@ -15,6 +17,9 @@ pub mod models;
 mod migrations;
 #[cfg(test)]
 mod tests;
+
+use self::models::{User, UserRole, Account, AccountType, AccountStatus, Transaction, 
+    TransactionType, TransactionStatus, AuditLog, AuditEventType, Token};
 
 // Database connection pool
 lazy_static! {
@@ -223,4 +228,149 @@ pub fn restore_backup(backup_path: &str) -> Result<()> {
     
     info!("Database backup restored successfully from {}", backup_path);
     Ok(())
+}
+
+/// Create a new token in the database
+pub fn store_token(
+    conn: &Connection,
+    token: &Token,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO tokens (
+            id, user_id, token_hash, expires_at, revoked, 
+            device_info, ip_address, created_at, revoked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params![
+            token.id,
+            token.user_id,
+            token.token_hash,
+            token.expires_at,
+            token.revoked as i32,
+            token.device_info,
+            token.ip_address,
+            token.created_at,
+            token.revoked_at,
+        ],
+    )
+    .context("Failed to store token in database")?;
+
+    debug!("Stored token {} for user {}", token.id, token.user_id);
+    Ok(())
+}
+
+/// Find a token by its token ID (jti claim)
+pub fn find_token_by_id(conn: &Connection, token_id: &str) -> Result<Option<Token>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, user_id, token_hash, expires_at, revoked, 
+                device_info, ip_address, created_at, revoked_at
+         FROM tokens 
+         WHERE id = ?",
+    )
+    .context("Failed to prepare statement to find token")?;
+
+    let token = stmt
+        .query_row(params![token_id], |row| {
+            Ok(Token {
+                id: row.get(0)?,
+                user_id: row.get(1)?,
+                token_hash: row.get(2)?,
+                expires_at: row.get(3)?,
+                revoked: row.get::<_, i32>(4)? != 0,
+                device_info: row.get(5)?,
+                ip_address: row.get(6)?,
+                created_at: row.get(7)?,
+                revoked_at: row.get(8)?,
+            })
+        })
+        .optional()
+        .context("Failed to query token")?;
+
+    Ok(token)
+}
+
+/// Find token by its hash
+pub fn find_token_by_hash(conn: &Connection, token_hash: &str) -> Result<Option<Token>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, user_id, token_hash, expires_at, revoked, 
+                device_info, ip_address, created_at, revoked_at
+         FROM tokens 
+         WHERE token_hash = ?",
+    )
+    .context("Failed to prepare statement to find token by hash")?;
+
+    let token = stmt
+        .query_row(params![token_hash], |row| {
+            Ok(Token {
+                id: row.get(0)?,
+                user_id: row.get(1)?,
+                token_hash: row.get(2)?,
+                expires_at: row.get(3)?,
+                revoked: row.get::<_, i32>(4)? != 0,
+                device_info: row.get(5)?,
+                ip_address: row.get(6)?,
+                created_at: row.get(7)?,
+                revoked_at: row.get(8)?,
+            })
+        })
+        .optional()
+        .context("Failed to query token by hash")?;
+
+    Ok(token)
+}
+
+/// Revoke a token
+pub fn revoke_token(conn: &Connection, token_id: &str) -> Result<bool> {
+    let now = Utc::now();
+    let result = conn.execute(
+        "UPDATE tokens 
+         SET revoked = 1, revoked_at = ? 
+         WHERE id = ? AND revoked = 0",
+        params![now, token_id],
+    )
+    .context("Failed to revoke token")?;
+
+    Ok(result > 0)
+}
+
+/// Revoke all tokens for a user
+pub fn revoke_all_user_tokens(conn: &Connection, user_id: &str) -> Result<usize> {
+    let now = Utc::now();
+    let result = conn.execute(
+        "UPDATE tokens 
+         SET revoked = 1, revoked_at = ? 
+         WHERE user_id = ? AND revoked = 0",
+        params![now, user_id],
+    )
+    .context("Failed to revoke all user tokens")?;
+
+    Ok(result as usize)
+}
+
+/// Check if a token is valid (exists, not expired, not revoked)
+pub fn is_token_valid(conn: &Connection, token_id: &str) -> Result<bool> {
+    let now = Utc::now();
+    let mut stmt = conn.prepare(
+        "SELECT COUNT(*) FROM tokens 
+         WHERE id = ? AND revoked = 0 AND expires_at > ?",
+    )
+    .context("Failed to prepare statement to check token validity")?;
+
+    let count: i64 = stmt
+        .query_row(params![token_id, now], |row| row.get(0))
+        .context("Failed to check token validity")?;
+
+    Ok(count > 0)
+}
+
+/// Clean up expired tokens
+pub fn clean_expired_tokens(conn: &Connection) -> Result<usize> {
+    let now = Utc::now();
+    let result = conn.execute(
+        "DELETE FROM tokens WHERE expires_at < ?",
+        params![now],
+    )
+    .context("Failed to clean up expired tokens")?;
+
+    debug!("Cleaned up {} expired tokens", result);
+    Ok(result as usize)
 } 

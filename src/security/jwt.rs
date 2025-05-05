@@ -8,12 +8,15 @@ use josekit::{
 };
 use josekit::jwe::alg::rsaes::{RsaesJweAlgorithm, RsaesJweDecrypter, RsaesJweEncrypter};
 use josekit::jwe::enc::aescbc::{A256CbcHsEncryption, A256CbcHs512};
-use log::{debug, warn};
+use log::{debug, warn, error};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::config;
-use crate::database::models::UserRole;
+use crate::database;
+use crate::database::models::{UserRole, Token};
+use rusqlite::Connection;
 
 /// JWT Claims structure
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,6 +38,17 @@ pub struct Claims {
     /// Two-factor authentication verified
     #[serde(default)]
     pub tfa_verified: bool,
+    /// Refresh token (only for refresh tokens)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<bool>,
+}
+
+/// Token type
+pub enum TokenType {
+    /// Access token (default)
+    Access,
+    /// Refresh token
+    Refresh,
 }
 
 /// Generate a JWT token for a user
@@ -43,12 +57,19 @@ pub fn generate_token(
     username: &str,
     role: &UserRole,
     tfa_verified: bool,
+    token_type: TokenType,
 ) -> Result<String> {
     let config = config::get_config();
     
     // Create token expiration time
     let now = Utc::now();
-    let expires_at = now + Duration::minutes(config.security.token_validity);
+    let (expires_at, is_refresh) = match token_type {
+        TokenType::Access => (now + Duration::minutes(config.security.token_validity), false),
+        TokenType::Refresh => (now + Duration::hours(24), true), // Refresh tokens valid for 24 hours
+    };
+    
+    // Create a unique token ID
+    let token_id = Uuid::new_v4().to_string();
     
     // Create claims
     let claims = Claims {
@@ -57,9 +78,10 @@ pub fn generate_token(
         role: role.as_str().to_string(),
         iat: now.timestamp(),
         exp: expires_at.timestamp(),
-        jti: Uuid::new_v4().to_string(),
+        jti: token_id,
         iss: config.app_name.clone(),
         tfa_verified,
+        refresh: if is_refresh { Some(true) } else { None },
     };
     
     // Create JWT header
@@ -73,7 +95,9 @@ pub fn generate_token(
     )
     .context("Failed to generate JWT token")?;
     
-    debug!("Generated JWT token for user {}", username);
+    debug!("Generated JWT {} token for user {}", 
+           if is_refresh { "refresh" } else { "access" }, 
+           username);
     Ok(token)
 }
 
@@ -82,7 +106,9 @@ pub fn validate_token(token: &str) -> Result<Claims> {
     let config = config::get_config();
     
     // Create validation parameters
-    let validation = Validation::new(Algorithm::HS256);
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+    validation.leeway = 60; // 60 seconds leeway for clock skew
     
     // Decode and validate the token
     let token_data = decode::<Claims>(
@@ -159,42 +185,185 @@ pub fn generate_rsa_key_pair() -> Result<(String, String)> {
     Ok((private_key_pem, public_key_pem))
 }
 
-/// Store token hash in database
-pub fn store_token(
-    user_id: &str,
-    token_id: &str,
-    expires_at: &chrono::DateTime<Utc>,
+/// Calculate a hash of the token for secure storage
+fn hash_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    let result = hasher.finalize();
+    hex::encode(result)
+}
+
+/// Store token in database with hash
+pub fn store_token_in_db(
+    conn: &Connection,
+    claims: &Claims,
     device_info: Option<&str>,
     ip_address: Option<&str>,
+    token: &str,
 ) -> Result<()> {
-    // TODO: Implement token storage in database
-    // This would create a record of valid tokens for better security
-    // and enable token revocation
+    // Hash the token for secure storage
+    let token_hash = hash_token(token);
     
-    debug!("Token {} for user {} stored in database", token_id, user_id);
+    // Create token expiration DateTime
+    let expires_at = Utc::now() + Duration::seconds(claims.exp - Utc::now().timestamp());
+    
+    // Create token model
+    let token_model = Token::new(
+        claims.sub.clone(),
+        token_hash,
+        expires_at,
+        device_info.map(String::from),
+        ip_address.map(String::from),
+    );
+    
+    // Store token in database
+    database::store_token(conn, &token_model)?;
+    
+    debug!("Token {} stored in database for user {}", claims.jti, claims.sub);
     Ok(())
 }
 
-/// Check if a token is revoked
-pub fn is_token_revoked(token_id: &str) -> Result<bool> {
-    // TODO: Implement token revocation check in database
-    // This would check if a token has been explicitly revoked
-    
-    Ok(false)
+/// Check if a token is revoked by looking up in the database
+pub fn is_token_revoked(conn: &Connection, token_id: &str) -> Result<bool> {
+    // First check if token exists and is valid
+    match database::is_token_valid(conn, token_id) {
+        Ok(valid) => Ok(!valid), // If token is valid, it's not revoked
+        Err(err) => {
+            // Log the error but continue (assume token is revoked for safety)
+            error!("Error checking token revocation status: {}", err);
+            Ok(true)
+        }
+    }
 }
 
-/// Revoke a token
-pub fn revoke_token(token_id: &str) -> Result<()> {
-    // TODO: Implement token revocation in database
-    // This would mark a token as revoked to prevent its use
+/// Revoke a token in the database
+pub fn revoke_token(conn: &Connection, token_id: &str) -> Result<bool> {
+    database::revoke_token(conn, token_id)
+}
+
+/// Generate a new access token from a refresh token
+pub fn refresh_access_token(conn: &Connection, refresh_token: &str) -> Result<String> {
+    // Validate the refresh token first
+    let claims = validate_token(refresh_token)?;
     
-    debug!("Token {} revoked", token_id);
-    Ok(())
+    // Check if this is actually a refresh token
+    if claims.refresh.unwrap_or(false) == false {
+        return Err(anyhow!("Not a valid refresh token"));
+    }
+    
+    // Check if token is revoked
+    if is_token_revoked(conn, &claims.jti)? {
+        return Err(anyhow!("Refresh token has been revoked"));
+    }
+    
+    // Generate a new access token
+    let role = UserRole::from_str(&claims.role)
+        .map_err(|e| anyhow!("Invalid role in token: {}", e))?;
+    
+    let access_token = generate_token(
+        &claims.sub,
+        &claims.username,
+        &role,
+        claims.tfa_verified,
+        TokenType::Access,
+    )?;
+    
+    debug!("Generated new access token via refresh for user {}", claims.username);
+    Ok(access_token)
+}
+
+/// Validate token and check for revocation in database
+pub fn validate_token_with_db(conn: &Connection, token: &str) -> Result<Claims> {
+    // First, validate the token signature and claims
+    let claims = validate_token(token)?;
+    
+    // Then, check if the token has been revoked
+    if is_token_revoked(conn, &claims.jti)? {
+        return Err(anyhow!("Token has been revoked"));
+    }
+    
+    Ok(claims)
+}
+
+/// Revoke all tokens for a user
+pub fn revoke_all_user_tokens(conn: &Connection, user_id: &str) -> Result<usize> {
+    database::revoke_all_user_tokens(conn, user_id)
+}
+
+/// Generate both access and refresh tokens for a user
+pub fn generate_token_pair(
+    conn: &Connection,
+    user_id: &str,
+    username: &str,
+    role: &UserRole,
+    tfa_verified: bool,
+    device_info: Option<&str>,
+    ip_address: Option<&str>,
+) -> Result<(String, String)> {
+    // Generate access token
+    let access_token = generate_token(
+        user_id,
+        username,
+        role,
+        tfa_verified,
+        TokenType::Access,
+    )?;
+    
+    // Generate refresh token
+    let refresh_token = generate_token(
+        user_id,
+        username,
+        role,
+        tfa_verified,
+        TokenType::Refresh,
+    )?;
+    
+    // Store access token in database
+    let access_claims = validate_token(&access_token)?;
+    store_token_in_db(conn, &access_claims, device_info, ip_address, &access_token)?;
+    
+    // Store refresh token in database
+    let refresh_claims = validate_token(&refresh_token)?;
+    store_token_in_db(conn, &refresh_claims, device_info, ip_address, &refresh_token)?;
+    
+    debug!("Generated token pair for user {}", username);
+    Ok((access_token, refresh_token))
+}
+
+/// Clean up expired tokens
+pub fn clean_expired_tokens(conn: &Connection) -> Result<usize> {
+    database::clean_expired_tokens(conn)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+    
+    // Helper to set up a test database
+    fn setup_test_db() -> (Connection, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db.sqlite");
+        let conn = Connection::open(&db_path).unwrap();
+        
+        // Create tokens table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS tokens (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                token_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                revoked INTEGER NOT NULL DEFAULT 0,
+                device_info TEXT,
+                ip_address TEXT,
+                created_at TEXT NOT NULL,
+                revoked_at TEXT
+            )",
+            [],
+        ).unwrap();
+        
+        (conn, temp_dir)
+    }
     
     #[test]
     fn test_jwt_generation_and_validation() {
@@ -204,7 +373,7 @@ mod tests {
         let tfa_verified = false;
         
         // Generate token
-        let token = generate_token(user_id, username, &role, tfa_verified).unwrap();
+        let token = generate_token(user_id, username, &role, tfa_verified, TokenType::Access).unwrap();
         
         // Validate token
         let claims = validate_token(&token).unwrap();
@@ -213,6 +382,27 @@ mod tests {
         assert_eq!(claims.username, username);
         assert_eq!(claims.role, role.as_str());
         assert_eq!(claims.tfa_verified, tfa_verified);
+        assert!(claims.refresh.is_none());
+    }
+    
+    #[test]
+    fn test_refresh_token_generation() {
+        let user_id = "test_user_id";
+        let username = "testuser";
+        let role = UserRole::User;
+        let tfa_verified = false;
+        
+        // Generate refresh token
+        let token = generate_token(user_id, username, &role, tfa_verified, TokenType::Refresh).unwrap();
+        
+        // Validate token
+        let claims = validate_token(&token).unwrap();
+        
+        assert_eq!(claims.sub, user_id);
+        assert_eq!(claims.username, username);
+        assert_eq!(claims.role, role.as_str());
+        assert_eq!(claims.tfa_verified, tfa_verified);
+        assert_eq!(claims.refresh, Some(true));
     }
     
     #[test]
@@ -225,7 +415,7 @@ mod tests {
         let username = "testuser";
         let role = UserRole::User;
         let tfa_verified = false;
-        let jwt = generate_token(user_id, username, &role, tfa_verified).unwrap();
+        let jwt = generate_token(user_id, username, &role, tfa_verified, TokenType::Access).unwrap();
         
         // Encrypt the token
         let jwe = encrypt_token(&jwt, &public_key).unwrap();
@@ -239,5 +429,62 @@ mod tests {
         // Validate the decrypted token
         let claims = validate_token(&decrypted_jwt).unwrap();
         assert_eq!(claims.sub, user_id);
+    }
+    
+    #[test]
+    fn test_token_storage_and_revocation() {
+        let (conn, _temp_dir) = setup_test_db();
+        
+        let user_id = "test_user_id";
+        let username = "testuser";
+        let role = UserRole::User;
+        let tfa_verified = false;
+        
+        // Generate token
+        let token = generate_token(user_id, username, &role, tfa_verified, TokenType::Access).unwrap();
+        let claims = validate_token(&token).unwrap();
+        
+        // Store token
+        store_token_in_db(&conn, &claims, Some("test_device"), Some("127.0.0.1"), &token).unwrap();
+        
+        // Check token is not revoked
+        assert_eq!(is_token_revoked(&conn, &claims.jti).unwrap(), false);
+        
+        // Revoke token
+        revoke_token(&conn, &claims.jti).unwrap();
+        
+        // Check token is now revoked
+        assert_eq!(is_token_revoked(&conn, &claims.jti).unwrap(), true);
+    }
+    
+    #[test]
+    fn test_token_pair_generation() {
+        let (conn, _temp_dir) = setup_test_db();
+        
+        let user_id = "test_user_id";
+        let username = "testuser";
+        let role = UserRole::User;
+        let tfa_verified = false;
+        
+        // Generate token pair
+        let (access_token, refresh_token) = generate_token_pair(
+            &conn,
+            user_id,
+            username,
+            &role,
+            tfa_verified,
+            Some("test_device"),
+            Some("127.0.0.1"),
+        ).unwrap();
+        
+        // Validate access token
+        let access_claims = validate_token(&access_token).unwrap();
+        assert_eq!(access_claims.sub, user_id);
+        assert_eq!(access_claims.refresh, None);
+        
+        // Validate refresh token
+        let refresh_claims = validate_token(&refresh_token).unwrap();
+        assert_eq!(refresh_claims.sub, user_id);
+        assert_eq!(refresh_claims.refresh, Some(true));
     }
 } 

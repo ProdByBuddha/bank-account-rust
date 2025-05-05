@@ -14,6 +14,7 @@ pub mod password;
 pub mod encryption;  // New encryption module with enhanced key management
 pub mod auth;  // New authentication middleware module
 pub mod trusted_devices;  // New module for trusted device management
+pub mod sensitive; // New module for sensitive operations
 
 // Re-export key functions from encryption module
 pub use encryption::{
@@ -50,6 +51,15 @@ pub use totp::{
     generate_recovery_codes,
     hash_recovery_code,
     TotpConfig,
+};
+
+// Re-export sensitive operation functions
+pub use sensitive::{
+    SensitiveOperation,
+    SensitiveOperationError,
+    verify_for_sensitive_operation,
+    require_verification_for_operation,
+    has_recent_verification,
 };
 
 // Length of the AES-256 key

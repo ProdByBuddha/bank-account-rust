@@ -238,7 +238,7 @@ impl Transaction {
 }
 
 /// Audit event type
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum AuditEventType {
     UserCreated,
     UserLogin,
@@ -248,6 +248,7 @@ pub enum AuditEventType {
     UserPasswordChanged,
     TotpEnabled,
     TotpDisabled,
+    TotpVerified,
     AccountCreated,
     AccountUpdated,
     AccountStatusChanged,
@@ -258,10 +259,13 @@ pub enum AuditEventType {
     BackupCreated,
     BackupRestored,
     SecurityEvent,
+    BackupCodeGenerated,
+    BackupCodeUsed,
+    SensitiveOpVerified,
 }
 
 impl AuditEventType {
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             AuditEventType::UserCreated => "user_created",
             AuditEventType::UserLogin => "user_login",
@@ -271,6 +275,7 @@ impl AuditEventType {
             AuditEventType::UserPasswordChanged => "user_password_changed",
             AuditEventType::TotpEnabled => "totp_enabled",
             AuditEventType::TotpDisabled => "totp_disabled",
+            AuditEventType::TotpVerified => "totp_verified",
             AuditEventType::AccountCreated => "account_created",
             AuditEventType::AccountUpdated => "account_updated",
             AuditEventType::AccountStatusChanged => "account_status_changed",
@@ -281,6 +286,9 @@ impl AuditEventType {
             AuditEventType::BackupCreated => "backup_created",
             AuditEventType::BackupRestored => "backup_restored",
             AuditEventType::SecurityEvent => "security_event",
+            AuditEventType::BackupCodeGenerated => "backup_code_generated",
+            AuditEventType::BackupCodeUsed => "backup_code_used",
+            AuditEventType::SensitiveOpVerified => "sensitive_op_verified",
         }
     }
     
@@ -294,6 +302,7 @@ impl AuditEventType {
             "user_password_changed" => Ok(AuditEventType::UserPasswordChanged),
             "totp_enabled" => Ok(AuditEventType::TotpEnabled),
             "totp_disabled" => Ok(AuditEventType::TotpDisabled),
+            "totp_verified" => Ok(AuditEventType::TotpVerified),
             "account_created" => Ok(AuditEventType::AccountCreated),
             "account_updated" => Ok(AuditEventType::AccountUpdated),
             "account_status_changed" => Ok(AuditEventType::AccountStatusChanged),
@@ -304,6 +313,9 @@ impl AuditEventType {
             "backup_created" => Ok(AuditEventType::BackupCreated),
             "backup_restored" => Ok(AuditEventType::BackupRestored),
             "security_event" => Ok(AuditEventType::SecurityEvent),
+            "backup_code_generated" => Ok(AuditEventType::BackupCodeGenerated),
+            "backup_code_used" => Ok(AuditEventType::BackupCodeUsed),
+            "sensitive_op_verified" => Ok(AuditEventType::SensitiveOpVerified),
             _ => Err(format!("Invalid audit event type: {}", s)),
         }
     }

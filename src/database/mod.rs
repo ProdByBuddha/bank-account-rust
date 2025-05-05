@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, anyhow};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, Savepoint, Transaction};
@@ -8,6 +8,7 @@ use lazy_static::lazy_static;
 use log::{info, error, debug, warn};
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
+use uuid;
 
 use crate::config;
 use crate::security;
@@ -25,6 +26,9 @@ use self::models::{User, UserRole, Account, AccountType, AccountStatus, Transact
 lazy_static! {
     static ref DB_POOL: RwLock<Option<Pool<SqliteConnectionManager>>> = RwLock::new(None);
 }
+
+// Constants for user authentication
+pub const MAX_FAILED_LOGIN_ATTEMPTS: u32 = 5;
 
 /// Initialize the database
 pub fn initialize() -> Result<()> {
@@ -373,4 +377,186 @@ pub fn clean_expired_tokens(conn: &Connection) -> Result<usize> {
 
     debug!("Cleaned up {} expired tokens", result);
     Ok(result as usize)
+}
+
+/// Get user by username
+pub fn get_user_by_username(conn: &Connection, username: &str) -> Result<Option<User>> {
+    let result = conn.query_row(
+        "SELECT 
+            id, username, password_hash, salt, role, 
+            failed_login_attempts, account_locked, lockout_time,
+            last_login, password_changed, totp_secret, totp_enabled,
+            created_at, updated_at
+         FROM users 
+         WHERE username = ?1",
+        params![username],
+        |row| {
+            let role_str: String = row.get(4)?;
+            let role = crate::database::models::UserRole::from_str(&role_str)
+                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(4, 
+                    rusqlite::types::Type::Text, Box::new(anyhow!(e))))?;
+            
+            Ok(User {
+                id: row.get(0)?,
+                username: row.get(1)?,
+                password_hash: row.get(2)?,
+                salt: row.get(3)?,
+                role,
+                failed_login_attempts: row.get(5)?,
+                account_locked: row.get::<_, i32>(6)? != 0,
+                lockout_time: row.get::<_, Option<String>>(7)?
+                    .map(|dt_str| chrono::DateTime::parse_from_rfc3339(&dt_str)
+                         .map(|dt| dt.with_timezone(&Utc))
+                         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(7, 
+                            rusqlite::types::Type::Text, Box::new(e))))
+                    .transpose()?,
+                last_login: row.get::<_, Option<String>>(8)?
+                    .map(|dt_str| chrono::DateTime::parse_from_rfc3339(&dt_str)
+                         .map(|dt| dt.with_timezone(&Utc))
+                         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(8, 
+                            rusqlite::types::Type::Text, Box::new(e))))
+                    .transpose()?,
+                password_changed: row.get::<_, Option<String>>(9)?
+                    .map(|dt_str| chrono::DateTime::parse_from_rfc3339(&dt_str)
+                         .map(|dt| dt.with_timezone(&Utc))
+                         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(9, 
+                            rusqlite::types::Type::Text, Box::new(e))))
+                    .transpose()?,
+                totp_secret: row.get(10)?,
+                totp_enabled: row.get::<_, i32>(11)? != 0,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(12, 
+                        rusqlite::types::Type::Text, Box::new(e)))?,
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(13)?)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(13, 
+                        rusqlite::types::Type::Text, Box::new(e)))?,
+            })
+        }
+    );
+    
+    match result {
+        Ok(user) => Ok(Some(user)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(anyhow!("Failed to get user by username: {}", e)),
+    }
+}
+
+/// Update failed login attempts for a user
+pub fn update_failed_login_attempts(conn: &Connection, user_id: &str, attempts: u32) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET 
+            failed_login_attempts = ?1,
+            updated_at = ?2
+         WHERE id = ?3",
+        params![
+            attempts,
+            Utc::now().to_rfc3339(),
+            user_id
+        ]
+    ).context("Failed to update failed login attempts")?;
+    
+    Ok(())
+}
+
+/// Lock a user account
+pub fn lock_user_account(conn: &Connection, user_id: &str) -> Result<()> {
+    let now = Utc::now();
+    conn.execute(
+        "UPDATE users SET 
+            account_locked = 1,
+            lockout_time = ?1,
+            updated_at = ?2
+         WHERE id = ?3",
+        params![
+            now.to_rfc3339(),
+            now.to_rfc3339(),
+            user_id
+        ]
+    ).context("Failed to lock user account")?;
+    
+    // Create audit log for account lockout
+    // In a real app, add more detailed info about the lockout
+    add_audit_log(
+        conn,
+        "account_locked",
+        Some(user_id),
+        Some("Account locked due to too many failed login attempts"),
+    )?;
+    
+    Ok(())
+}
+
+/// Reset failed login attempts for a user
+pub fn reset_failed_login_attempts(conn: &Connection, user_id: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET 
+            failed_login_attempts = 0,
+            account_locked = 0,
+            lockout_time = NULL,
+            updated_at = ?1
+         WHERE id = ?2",
+        params![
+            Utc::now().to_rfc3339(),
+            user_id
+        ]
+    ).context("Failed to reset failed login attempts")?;
+    
+    Ok(())
+}
+
+/// Update last login time for a user
+pub fn update_last_login(conn: &Connection, user_id: &str) -> Result<()> {
+    let now = Utc::now();
+    conn.execute(
+        "UPDATE users SET 
+            last_login = ?1,
+            updated_at = ?2
+         WHERE id = ?3",
+        params![
+            now.to_rfc3339(),
+            now.to_rfc3339(),
+            user_id
+        ]
+    ).context("Failed to update last login time")?;
+    
+    // Create audit log for login
+    add_audit_log(
+        conn,
+        "user_login",
+        Some(user_id),
+        Some("User logged in successfully"),
+    )?;
+    
+    Ok(())
+}
+
+/// Add audit log entry
+fn add_audit_log(
+    conn: &Connection,
+    event_type: &str,
+    user_id: Option<&str>,
+    details: Option<&str>
+) -> Result<()> {
+    let now = Utc::now();
+    let audit_id = uuid::Uuid::new_v4().to_string();
+    
+    conn.execute(
+        "INSERT INTO audit_logs (
+            id, event_type, user_id, details, timestamp, created_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6
+        )",
+        params![
+            audit_id,
+            event_type,
+            user_id,
+            details,
+            now.to_rfc3339(),
+            now.to_rfc3339(),
+        ]
+    ).context("Failed to add audit log entry")?;
+    
+    Ok(())
 } 

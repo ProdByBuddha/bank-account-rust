@@ -151,6 +151,18 @@ pub fn create_schema(conn: &mut Connection) -> Result<()> {
         [],
     ).context("Failed to create compliance_checks table")?;
     
+    // Create recent_verifications table for tracking 2FA verifications
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS recent_verifications (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            verified_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )",
+        [],
+    ).context("Failed to create recent_verifications table")?;
+    
     // Create indices for faster lookups
     tx.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)", [])
         .context("Failed to create index on users.username")?;
@@ -169,6 +181,14 @@ pub fn create_schema(conn: &mut Connection) -> Result<()> {
     
     tx.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type ON audit_logs(event_type)", [])
         .context("Failed to create index on audit_logs.event_type")?;
+    
+    tx.execute("CREATE INDEX IF NOT EXISTS idx_recent_verifications_user_id 
+     ON recent_verifications(user_id)", [],)
+        .context("Failed to create recent_verifications user ID index")?;
+    
+    tx.execute("CREATE INDEX IF NOT EXISTS idx_recent_verifications_verified_at 
+     ON recent_verifications(verified_at)", [],)
+        .context("Failed to create recent_verifications verified_at index")?;
     
     // Commit the transaction
     tx.commit().context("Failed to commit schema creation transaction")?;

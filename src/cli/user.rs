@@ -7,6 +7,10 @@ use crate::cli::utils::{display_qr_code, display_spinner, read_line, display_rec
 use crate::database;
 use crate::user::two_factor::{self, TwoFactorError};
 use crate::security::auth::{self, AuthResult};
+use crate::security::{
+    SensitiveOperation,
+    verify_for_sensitive_operation,
+};
 
 /// Handle enabling two-factor authentication
 pub fn enable_2fa(user_id: &str) -> Result<()> {
@@ -148,6 +152,34 @@ pub fn generate_backup_codes(user_id: &str) -> Result<()> {
             error!("Failed to generate backup codes: {}", e);
             println!("\n❌ Failed to generate backup codes: {}", e);
             Err(anyhow!("Failed to generate backup codes: {}", e))
+        }
+    }
+}
+
+/// Verify 2FA for a sensitive operation
+pub fn verify_for_operation(user_id: &str, operation_str: &str, code: &str) -> Result<()> {
+    info!("Verifying 2FA for sensitive operation: {}", operation_str);
+    
+    // Connect to the database
+    let conn = crate::database::connect()?;
+    
+    // Parse the operation type
+    let operation = match SensitiveOperation::from_str(operation_str) {
+        Ok(op) => op,
+        Err(e) => {
+            return Err(anyhow!("Invalid operation type: {}", e));
+        }
+    };
+    
+    // Verify the 2FA code for the operation
+    match verify_for_sensitive_operation(&conn, user_id, code, operation) {
+        Ok(()) => {
+            println!("✅ Verification successful for operation: {}", operation.friendly_name());
+            Ok(())
+        },
+        Err(e) => {
+            error!("2FA verification failed: {}", e);
+            Err(anyhow!("2FA verification failed: {}", e))
         }
     }
 } 

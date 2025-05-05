@@ -22,17 +22,20 @@ A security-focused terminal-based banking system written in Rust. This applicati
 ### Building from Source
 
 1. Clone the repository:
+
    ```bash
-   git clone https://github.com/yourusername/secure-bank-cli.git
+   git clone https://github.com/prodbybuddha/secure-bank-cli.git
    cd secure-bank-cli
    ```
 
 2. Build the project:
+
    ```bash
    cargo build --release
    ```
 
 3. Run the executable:
+
    ```bash
    ./target/release/secure-bank-cli
    ```
@@ -106,4 +109,4 @@ This application implements industry-standard security practices:
 
 ## License
 
-This project is licensed under the GPL-3.0 License - see the LICENSE file for details. 
+This project is licensed under the GPL-3.0 License - see the LICENSE file for details.

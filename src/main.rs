@@ -90,7 +90,18 @@ enum UserCommands {
     Disable2FA {},
     
     /// Generate new 2FA backup codes
-    BackupCodes {},
+    GenBackupCodes {},
+    
+    /// Verify 2FA code for a sensitive operation
+    Verify2FA {
+        /// The operation type to verify (transfer_funds, change_password, etc.)
+        #[arg(long, short = 'o')]
+        operation: String,
+        
+        /// The verification code from your authenticator app
+        #[arg(long, short = 'c')]
+        code: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -270,7 +281,7 @@ fn main() {
                         }
                     }
                 }
-                UserCommands::BackupCodes {} => {
+                UserCommands::GenBackupCodes {} => {
                     // Mock user ID (in a real app, this would be obtained from the authenticated session)
                     let user_id = "test-user";
                     
@@ -279,6 +290,19 @@ fn main() {
                         Err(err) => {
                             error!("Error generating backup codes: {}", err);
                             process::exit(1);
+                        }
+                    }
+                }
+                UserCommands::Verify2FA { operation, code } => {
+                    let user_id = auth_result.user_id.clone();
+                    
+                    match cli::user::verify_for_operation(&user_id, &operation, &code) {
+                        Ok(()) => {
+                            println!("✅ 2FA verification successful for operation: {}", operation);
+                        },
+                        Err(err) => {
+                            error!("Error verifying 2FA: {}", err);
+                            std::process::exit(1);
                         }
                     }
                 }

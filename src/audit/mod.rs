@@ -14,6 +14,7 @@ use crate::security;
 // Import submodules
 pub mod repository;
 pub mod archiver;
+pub mod compliance;
 
 use repository::AuditRepository;
 use archiver::LogArchiver;

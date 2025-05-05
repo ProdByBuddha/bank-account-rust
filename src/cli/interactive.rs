@@ -238,14 +238,8 @@ pub fn compliance_check_interactive(auth: &AuthResult) -> Result<()> {
                 pb.set(i + 1)?;
             }
             
-            // This would call the actual compliance check function
-            // cli::audit::run_compliance_check(auth, &standard, &scope)
-            
-            // For now, just show a success message
-            print_success("Compliance check completed successfully");
-            print_info("All security requirements are met");
-            
-            Ok(())
+            // Call the actual compliance check function
+            crate::cli::security::run_compliance_check(auth)
         }
     )
 }
@@ -316,6 +310,48 @@ pub fn audit_search_interactive(auth: &AuthResult) -> Result<()> {
             print_success("Search completed successfully");
             
             Ok(())
+        }
+    )
+}
+
+/// Interactive security self-assessment
+pub fn security_assessment_interactive(auth: &AuthResult) -> Result<()> {
+    Interactive::wizard(
+        "Security Self-Assessment",
+        vec![
+            "Configure assessment options",
+            "Run assessment",
+            "View results"
+        ],
+        || {
+            // Step 1: Configure assessment options
+            print_header("Assessment Options");
+            
+            let option_types = vec![
+                ("Check for sensitive data exposure".to_string(), "sensitive_data".to_string()),
+                ("Apply data retention policies".to_string(), "data_retention".to_string()),
+                ("Generate security report".to_string(), "security_report".to_string()),
+                ("All of the above".to_string(), "all".to_string()),
+            ];
+            
+            let option = Interactive::menu("Select assessment type", &option_types)?;
+            
+            // Step 2: Run assessment
+            print_header("Running Security Assessment");
+            
+            print_info(&format!("Running security assessment with {} options...", option));
+            
+            let pb = Interactive::progress_bar("Analyzing system", 12);
+            for i in 0..12 {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                pb.set(i + 1)?;
+            }
+            
+            // Step 3: View results
+            print_header("Assessment Results");
+            
+            // Call the actual security assessment function
+            crate::cli::security::run_security_assessment(auth)
         }
     )
 } 

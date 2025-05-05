@@ -385,6 +385,9 @@ enum SecurityCommands {
     /// Run a compliance check
     ComplianceCheck {},
     
+    /// Run a security self-assessment
+    SecurityAssessment {},
+    
     /// Create an encrypted backup
     Backup {
         /// Output file path (optional, uses default if not specified)
@@ -1046,9 +1049,14 @@ fn process_security_command(command: &SecurityCommands, interactive: bool) {
                             if interactive {
                                 cli::interactive::compliance_check_interactive(&auth)
                             } else {
-                                // Mock implementation
-                                print_info("Running compliance check...");
-                                Ok(())
+                                cli::security::run_compliance_check(&auth)
+                            }
+                        },
+                        SecurityCommands::SecurityAssessment {} => {
+                            if interactive {
+                                cli::interactive::security_assessment_interactive(&auth)
+                            } else {
+                                cli::security::run_security_assessment(&auth)
                             }
                         },
                         SecurityCommands::Backup { output, description } => {

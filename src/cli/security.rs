@@ -7,6 +7,8 @@ use std::path::Path;
 use crate::cli::utils::{print_error, print_info, print_success, print_warning, Interactive};
 use crate::database::backup;
 use crate::security::auth::AuthResult;
+use crate::audit::compliance;
+use crate::database;
 
 /// Create a backup with optional custom path and description
 pub fn create_backup(
@@ -335,4 +337,152 @@ fn format_size(size_bytes: u64) -> String {
     } else {
         format!("{:.2} GB", size_bytes as f64 / GB as f64)
     }
+}
+
+/// Run PCI-DSS compliance check and display results
+pub fn run_compliance_check(auth: &AuthResult) -> Result<()> {
+    // Check permissions
+    if !auth.has_permission("security_audit") {
+        return Err(anyhow!("You don't have permission to run compliance checks"));
+    }
+    
+    print_info("Running PCI-DSS compliance check...");
+    
+    // Get database connection
+    let conn = database::get_connection()?;
+    
+    // Run the compliance check
+    let report = compliance::run_compliance_check(&conn)?;
+    
+    // Display the results
+    print_success("\n=== COMPLIANCE CHECK RESULTS ===");
+    println!("Total checks performed: {}", report.total_checks);
+    println!("Passing checks: {} ({:.1}%)", 
+             report.passing_checks, 
+             (report.passing_checks as f64 / report.total_checks as f64) * 100.0);
+    println!("Critical issues: {}", report.failing_checks);
+    println!("Warnings: {}", report.warning_checks);
+    println!();
+    
+    // Display critical issues
+    if report.failing_checks > 0 {
+        print_error("CRITICAL ISSUES:");
+        for issue in &report.issues {
+            if issue.severity == compliance::Severity::Critical {
+                println!("- [{}] {}: {}", issue.code, issue.name, issue.message);
+                if let Some(remediation) = &issue.remediation {
+                    println!("  Remediation: {}", remediation);
+                }
+            }
+        }
+        println!();
+    }
+    
+    // Display warnings
+    if report.warning_checks > 0 {
+        print_warning("WARNINGS:");
+        for issue in &report.issues {
+            if issue.severity == compliance::Severity::Warning {
+                println!("- [{}] {}: {}", issue.code, issue.name, issue.message);
+                if let Some(remediation) = &issue.remediation {
+                    println!("  Remediation: {}", remediation);
+                }
+            }
+        }
+        println!();
+    }
+    
+    // Display passing checks
+    print_success("PASSING CHECKS:");
+    for check in &report.passing {
+        println!("- [{}] {}", check.code, check.name);
+    }
+    
+    // Display compliance status
+    let compliance_percentage = (report.passing_checks as f64 / report.total_checks as f64) * 100.0;
+    if compliance_percentage >= 100.0 {
+        print_success(&format!("\nPCI-DSS compliance: {:.1}% - COMPLIANT", compliance_percentage));
+    } else if compliance_percentage >= 80.0 {
+        print_warning(&format!("\nPCI-DSS compliance: {:.1}% - PARTIALLY COMPLIANT", compliance_percentage));
+    } else {
+        print_error(&format!("\nPCI-DSS compliance: {:.1}% - NON-COMPLIANT", compliance_percentage));
+    }
+    
+    // Offer to save the report
+    print_info("\nWould you like to save a detailed report? (y/N)");
+    io::stdout().flush()?;
+    
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    
+    if input.trim().eq_ignore_ascii_case("y") {
+        let report_json = serde_json::to_string_pretty(&report)?;
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let filename = format!("pci_dss_compliance_{}.json", timestamp);
+        
+        std::fs::write(&filename, report_json)?;
+        print_success(&format!("Report saved to {}", filename));
+    }
+    
+    Ok(())
+}
+
+/// Run security self-assessment
+pub fn run_security_assessment(auth: &AuthResult) -> Result<()> {
+    // Check permissions
+    if !auth.has_permission("security_audit") {
+        return Err(anyhow!("You don't have permission to run security assessments"));
+    }
+    
+    print_info("Running security self-assessment...");
+    
+    // Get database connection
+    let conn = database::get_connection()?;
+    
+    // Discover sensitive data
+    let sensitive_data = compliance::discover_sensitive_data(&conn)?;
+    
+    // Enforce data retention policy
+    let retained_records = compliance::enforce_data_retention_policy(&conn)?;
+    
+    // Display results
+    print_success("\n=== SECURITY ASSESSMENT RESULTS ===");
+    
+    // Sensitive data discovery
+    print_info("\nPotential Sensitive Data Exposure:");
+    if sensitive_data.is_empty() {
+        println!("No potentially exposed sensitive data found.");
+    } else {
+        for item in &sensitive_data {
+            println!("- Found in table: {}, ID: {}, Field: {}, Type: {}", 
+                     item.get("table").unwrap_or(&"unknown".to_string()),
+                     item.get("id").unwrap_or(&"unknown".to_string()),
+                     item.get("field").unwrap_or(&"unknown".to_string()),
+                     item.get("type").unwrap_or(&"unknown".to_string()));
+        }
+    }
+    
+    // Data retention policy enforcement
+    print_info("\nData Retention Policy:");
+    println!("Archived {} records based on data retention policy", retained_records);
+    
+    // Generate security report
+    let report = compliance::generate_security_report(&conn)?;
+    
+    // Offer to save the report
+    print_info("\nWould you like to save the security assessment report? (y/N)");
+    io::stdout().flush()?;
+    
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    
+    if input.trim().eq_ignore_ascii_case("y") {
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let filename = format!("security_assessment_{}.json", timestamp);
+        
+        std::fs::write(&filename, report)?;
+        print_success(&format!("Report saved to {}", filename));
+    }
+    
+    Ok(())
 } 

@@ -84,4 +84,19 @@ pub fn display_recovery_codes(codes: &[String]) -> Result<()> {
     let _confirmation = read_line("Press Enter when you have saved these codes...")?;
     
     Ok(())
+}
+
+/// Convert clap app to ArgMatches for command handling
+pub fn convert_to_argmatches() -> clap::ArgMatches {
+    use clap::{Arg, Command};
+    
+    // Create a command structure similar to what's in main.rs
+    let app = Command::new("secure-bank-cli")
+        .about("A security-focused terminal-based banking system");
+    
+    // Add the audit subcommand
+    let app = crate::cli::audit::add_audit_commands(app);
+    
+    // Parse the command line arguments
+    app.get_matches()
 } 

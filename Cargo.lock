@@ -1967,6 +1967,7 @@ dependencies = [
  "clap",
  "dotenv",
  "env_logger",
+ "flate2",
  "hex",
  "hmac",
  "josekit",

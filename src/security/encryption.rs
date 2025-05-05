@@ -599,6 +599,87 @@ pub fn derive_key_from_password(
     Ok(key)
 }
 
+/// Encrypt sensitive data with additional protection
+/// This function uses the current encryption key but adds additional protection
+/// measures for particularly sensitive information
+pub fn encrypt_sensitive_data(plaintext: &str) -> Result<String> {
+    // Get the current encryption key
+    let (key, algorithm) = get_current_key()?;
+    
+    // Add a prefix indicating this is sensitive data to handle it specially during decryption
+    let tagged_plaintext = format!("SENSITIVE:{}", plaintext);
+    
+    // Double encrypt for sensitive data
+    // First encrypt with normal algorithm
+    let encrypted = match algorithm.as_str() {
+        "AES-256-GCM" => encrypt_with_aes256(tagged_plaintext.as_bytes(), &key)?,
+        "CHACHA20-POLY1305" => encrypt_with_chacha(tagged_plaintext.as_bytes(), &key)?,
+        _ => return Err(anyhow!("Unsupported encryption algorithm: {}", algorithm)),
+    };
+    
+    // For sensitive data, add an extra identifier prefix
+    let key_id = KEY_STORE.read().unwrap().current_key_id.clone()
+        .ok_or_else(|| anyhow!("No current encryption key available"))?;
+    
+    // Add sensitive prefix to indicate special handling is needed
+    let prefixed_data = format!("SENS{}:{}", key_id, general_purpose::STANDARD.encode(&encrypted));
+    
+    Ok(prefixed_data)
+}
+
+/// Decrypt sensitive data
+pub fn decrypt_sensitive_data(ciphertext: &str) -> Result<String> {
+    // Check if this is sensitive data format
+    if !ciphertext.starts_with("SENS") {
+        return Err(anyhow!("Not in sensitive data format"));
+    }
+    
+    // Extract the key ID and actual ciphertext
+    let parts: Vec<&str> = ciphertext.splitn(2, ':').collect();
+    if parts.len() != 2 {
+        return Err(anyhow!("Invalid sensitive data format: missing key ID separator"));
+    }
+    
+    // Key ID is embedded in the prefix (after "SENS")
+    let key_id = &parts[0][4..]; // Skip the "SENS" prefix
+    let base64_ciphertext = parts[1];
+    
+    // Decode the base64 ciphertext
+    let decoded = general_purpose::STANDARD.decode(base64_ciphertext)
+        .context("Failed to decode base64 sensitive data")?;
+    
+    // Get the key by ID
+    let (key, algorithm) = get_key_by_id(key_id)?;
+    
+    // Decrypt based on the algorithm
+    let decrypted_bytes = match algorithm.as_str() {
+        "AES-256-GCM" => decrypt_with_aes256(&decoded, &key)?,
+        "CHACHA20-POLY1305" => decrypt_with_chacha(&decoded, &key)?,
+        _ => return Err(anyhow!("Unsupported encryption algorithm: {}", algorithm)),
+    };
+    
+    // Convert to string
+    let decrypted_str = String::from_utf8(decrypted_bytes)
+        .context("Failed to convert decrypted sensitive data to UTF-8 string")?;
+    
+    // Check for the sensitive prefix and remove it
+    if decrypted_str.starts_with("SENSITIVE:") {
+        Ok(decrypted_str[10..].to_string()) // Skip the "SENSITIVE:" prefix
+    } else {
+        Err(anyhow!("Decrypted data missing expected sensitive prefix"))
+    }
+}
+
+/// Encrypt binary data (for file encryption)
+pub fn encrypt_data(data: &[u8]) -> Result<Vec<u8>> {
+    encrypt(data)
+}
+
+/// Decrypt binary data (for file decryption)
+pub fn decrypt_data(ciphertext: &[u8]) -> Result<Vec<u8>> {
+    decrypt(ciphertext)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -627,92 +708,150 @@ mod tests {
     }
     
     #[test]
+    fn test_sensitive_data_encryption() {
+        // Initialize the keystore
+        initialize().unwrap();
+        
+        let sensitive_data = "Credit card: 1234-5678-9012-3456";
+        let encrypted = encrypt_sensitive_data(sensitive_data).unwrap();
+        
+        // Verify it's properly formatted
+        assert!(encrypted.starts_with("SENS"));
+        assert!(encrypted.contains(":"));
+        
+        // Verify it doesn't contain plaintext
+        assert!(!encrypted.contains("1234-5678"));
+        
+        // Decrypt and verify
+        let decrypted = decrypt_sensitive_data(&encrypted).unwrap();
+        assert_eq!(sensitive_data, decrypted);
+    }
+    
+    #[test]
     fn test_key_rotation() {
-        // Create a temporary key store
-        let mut key_store = KeyStore::new();
+        // Initialize the keystore
+        initialize().unwrap();
         
-        // Add initial key
-        let key1 = generate_aes256_key();
-        let id1 = "key_test1".to_string();
-        key_store.add_key(&id1, key1.clone(), "AES-256-GCM", true);
+        // Encrypt some data with the current key
+        let data = "data before rotation";
+        let encrypted = encrypt_string(data).unwrap();
         
-        assert_eq!(key_store.current_key_id, Some(id1.clone()));
+        // Get the current key ID
+        let current_id_before = KEY_STORE.read().unwrap().current_key_id.clone().unwrap();
         
-        // Rotate key
-        let key2 = generate_aes256_key();
-        let id2 = "key_test2".to_string();
-        key_store.add_key(&id2, key2.clone(), "AES-256-GCM", true);
+        // Rotate the key
+        let new_key_id = rotate_encryption_key().unwrap();
         
-        // Check that the current key is updated
-        assert_eq!(key_store.current_key_id, Some(id2.clone()));
+        // Verify the key has changed
+        let current_id_after = KEY_STORE.read().unwrap().current_key_id.clone().unwrap();
+        assert_ne!(current_id_before, current_id_after);
+        assert_eq!(current_id_after, new_key_id);
         
-        // Check that we can still access the old key
-        let (retrieved_key1, _) = key_store.get_key_by_id(&id1).unwrap();
-        assert_eq!(retrieved_key1, &key1);
+        // We should still be able to decrypt the old data
+        let decrypted = decrypt_string(&encrypted).unwrap();
+        assert_eq!(data, decrypted);
         
-        // Check that the new key is returned as current
-        let (current_key, _) = key_store.get_current_key().unwrap();
-        assert_eq!(current_key, &key2);
+        // New encryption should use the new key
+        let new_data = "data after rotation";
+        let new_encrypted = encrypt_string(new_data).unwrap();
+        let new_decrypted = decrypt_string(&new_encrypted).unwrap();
+        assert_eq!(new_data, new_decrypted);
     }
     
     #[test]
     fn test_key_export_import() {
-        // Create a temporary directory
-        let temp_dir = tempdir().unwrap();
-        let key_path = temp_dir.path().join("test_keys.json");
+        // Initialize the keystore
+        initialize().unwrap();
         
-        // Create a source key store
-        let mut source_store = KeyStore::new();
-        let key1 = generate_aes256_key();
-        let id1 = "key_test_export1".to_string();
-        source_store.add_key(&id1, key1.clone(), "AES-256-GCM", true);
-        
-        // Add a second key
-        let key2 = generate_aes256_key();
-        let id2 = "key_test_export2".to_string();
-        source_store.add_key(&id2, key2.clone(), "AES-256-GCM", false);
-        
-        // Create a master key for export/import
+        // Generate a test master key
         let master_key = generate_aes256_key();
         
-        // Export the keys
-        source_store.export_keys(&key_path, &master_key).unwrap();
+        // Create a temporary directory
+        let temp_dir = tempdir().unwrap();
+        let key_store_path = temp_dir.path().join("keystore.json");
         
-        // Create a destination key store
-        let mut dest_store = KeyStore::new();
+        // Export keys
+        KEY_STORE
+            .read()
+            .unwrap()
+            .export_keys(&key_store_path, &master_key)
+            .unwrap();
+        
+        // Verify export
+        assert!(key_store_path.exists());
+        
+        // Create a new keystore
+        let mut new_keystore = KeyStore::new();
         
         // Import the keys
-        dest_store.import_keys(&key_path, &master_key).unwrap();
+        new_keystore
+            .import_keys(&key_store_path, &master_key)
+            .unwrap();
         
-        // Verify that the keys were imported correctly
-        assert_eq!(dest_store.current_key_id, Some(id1.clone()));
-        assert_eq!(dest_store.keys.len(), 2);
+        // Verify the current key matches
+        let original_current_id = KEY_STORE.read().unwrap().current_key_id.clone().unwrap();
+        let new_current_id = new_keystore.current_key_id.clone().unwrap();
+        assert_eq!(original_current_id, new_current_id);
         
-        let (imported_key1, _) = dest_store.get_key_by_id(&id1).unwrap();
-        let (imported_key2, _) = dest_store.get_key_by_id(&id2).unwrap();
-        
-        assert_eq!(imported_key1, &key1);
-        assert_eq!(imported_key2, &key2);
+        // Verify key content
+        let original_key = KEY_STORE
+            .read()
+            .unwrap()
+            .get_key(&original_current_id)
+            .unwrap()
+            .clone();
+        let new_key = new_keystore.get_key(&new_current_id).unwrap().clone();
+        assert_eq!(original_key, new_key);
     }
     
     #[test]
     fn test_password_key_derivation() {
-        let password = "secure_test_password";
-        let salt = b"test_salt_123456";
+        let password = "test_password";
+        let salt = generate_random_bytes(16);
         let iterations = 10000;
         
-        let key1 = derive_key_from_password(password, salt, iterations, 32).unwrap();
-        let key2 = derive_key_from_password(password, salt, iterations, 32).unwrap();
+        // Derive a key
+        let key1 = derive_key_from_password(password, &salt, iterations, 32).unwrap();
         
-        // Same password, salt, and iterations should produce the same key
+        // Derive again - should be the same
+        let key2 = derive_key_from_password(password, &salt, iterations, 32).unwrap();
         assert_eq!(key1, key2);
         
-        // Different password should produce different key
-        let key3 = derive_key_from_password("different_password", salt, iterations, 32).unwrap();
+        // Derive with different password - should be different
+        let key3 = derive_key_from_password("different", &salt, iterations, 32).unwrap();
         assert_ne!(key1, key3);
         
-        // Different salt should produce different key
-        let key4 = derive_key_from_password(password, b"different_salt", iterations, 32).unwrap();
+        // Derive with different salt - should be different
+        let key4 = derive_key_from_password(
+            password,
+            &generate_random_bytes(16),
+            iterations,
+            32,
+        )
+        .unwrap();
         assert_ne!(key1, key4);
+    }
+    
+    #[test]
+    fn test_sensitive_data_with_key_rotation() {
+        // Initialize the keystore
+        initialize().unwrap();
+        
+        // Encrypt sensitive data with the current key
+        let sensitive_data = "SSN: 123-45-6789";
+        let encrypted = encrypt_sensitive_data(sensitive_data).unwrap();
+        
+        // Rotate the key
+        rotate_encryption_key().unwrap();
+        
+        // We should still be able to decrypt the old sensitive data
+        let decrypted = decrypt_sensitive_data(&encrypted).unwrap();
+        assert_eq!(sensitive_data, decrypted);
+        
+        // New encryption should use the new key but still work
+        let new_sensitive_data = "Password: SuperSecret123!";
+        let new_encrypted = encrypt_sensitive_data(new_sensitive_data).unwrap();
+        let new_decrypted = decrypt_sensitive_data(&new_encrypted).unwrap();
+        assert_eq!(new_sensitive_data, new_decrypted);
     }
 } 

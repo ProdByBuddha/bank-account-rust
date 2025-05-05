@@ -65,6 +65,12 @@ enum Commands {
         #[clap(subcommand)]
         command: SecurityCommands,
     },
+    
+    /// Audit trail and logging commands
+    Audit {
+        #[clap(subcommand)]
+        command: AuditCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -356,6 +362,94 @@ enum SecurityCommands {
         /// Input file
         #[clap(short, long)]
         input: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuditCommands {
+    /// Search audit logs
+    Search {
+        /// Filter by user ID
+        #[clap(long)]
+        user_id: Option<String>,
+        
+        /// Filter by account ID
+        #[clap(long)]
+        account_id: Option<String>,
+        
+        /// Filter by event type
+        #[clap(long)]
+        event_type: Option<String>,
+        
+        /// Start date in YYYY-MM-DD format
+        #[clap(long)]
+        from_date: Option<String>,
+        
+        /// End date in YYYY-MM-DD format
+        #[clap(long)]
+        to_date: Option<String>,
+        
+        /// Maximum number of records to return
+        #[clap(long, short, default_value = "50")]
+        limit: usize,
+        
+        /// Search in log details text
+        #[clap(long)]
+        text: Option<String>,
+    },
+    
+    /// Rotate audit logs if they exceed the maximum size
+    Rotate {},
+    
+    /// Purge old audit logs based on retention policy
+    Purge {
+        /// Confirm purging without additional prompt
+        #[clap(long)]
+        confirm: bool,
+    },
+    
+    /// Encrypt sensitive information in audit logs
+    EncryptSensitive {},
+    
+    /// Export audit logs to a file
+    Export {
+        /// Output file path
+        #[clap(long, short)]
+        output: String,
+        
+        /// Output format (json or csv)
+        #[clap(long, short, default_value = "json")]
+        format: String,
+        
+        /// Filter by user ID
+        #[clap(long)]
+        user_id: Option<String>,
+        
+        /// Start date in YYYY-MM-DD format
+        #[clap(long)]
+        from_date: Option<String>,
+        
+        /// End date in YYYY-MM-DD format
+        #[clap(long)]
+        to_date: Option<String>,
+    },
+    
+    /// Decrypt an encrypted audit log archive
+    Decrypt {
+        /// Input encrypted file path
+        #[clap(long, short)]
+        input: String,
+        
+        /// Output file path
+        #[clap(long, short)]
+        output: String,
+    },
+    
+    /// Check for suspicious activity
+    Suspicious {
+        /// User ID to check
+        #[clap(long)]
+        user_id: String,
     },
 }
 
@@ -914,6 +1008,38 @@ fn main() {
                 SecurityCommands::Restore { input } => {
                     println!("Restoring from encrypted backup: {}", input);
                     // TODO: Implement restore
+                }
+            }
+        }
+        Commands::Audit { command } => {
+            match get_auth_token() {
+                Some(token) => {
+                    let conn = database::get_connection().unwrap_or_else(|e| {
+                        error!("Failed to connect to the database: {}", e);
+                        process::exit(1);
+                    });
+                    
+                    match security::authenticate(&conn, &token) {
+                        Ok(auth) => {
+                            // Use the audit command handler
+                            let args_matches = cli::utils::convert_to_argmatches();
+                            if let Some(audit_matches) = args_matches.subcommand_matches("audit") {
+                                if let Err(e) = cli::audit::handle_audit_command(audit_matches, &auth) {
+                                    println!("Error handling audit command: {}", e);
+                                }
+                            } else {
+                                println!("Invalid audit command");
+                            }
+                        },
+                        Err(e) => {
+                            println!("Authentication error: {}", e);
+                            process::exit(1);
+                        }
+                    }
+                },
+                None => {
+                    println!("You must be logged in to use audit commands.");
+                    process::exit(1);
                 }
             }
         }

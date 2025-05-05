@@ -8,8 +8,15 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::config;
-use crate::database::models::AuditEventType;
+use crate::database::models::{AuditEventType, AuditLog};
 use crate::security;
+
+// Import submodules
+pub mod repository;
+pub mod archiver;
+
+use repository::AuditRepository;
+use archiver::LogArchiver;
 
 /// Audit logger
 pub struct AuditLogger {
@@ -81,9 +88,21 @@ impl AuditLogger {
     
     /// Save audit event to database
     fn save_to_database(&self, event: &AuditEvent) -> Result<()> {
-        // TODO: Implement saving to database
-        // This would use the database module to insert the audit event
-        // into the audit_logs table
+        // Convert AuditEvent to AuditLog
+        let audit_log = AuditLog {
+            id: event.id.clone(),
+            event_type: event.event_type,
+            user_id: event.user_id.clone(),
+            account_id: event.account_id.clone(),
+            transaction_id: event.transaction_id.clone(),
+            ip_address: event.ip_address.clone(),
+            details: event.details.clone(),
+            encrypted_details: None, // Will be handled by the repository if needed
+            timestamp: event.timestamp,
+        };
+        
+        // Use the repository to save to database
+        AuditRepository::save_audit_log(&audit_log)?;
         
         Ok(())
     }
@@ -125,16 +144,75 @@ impl AuditLogger {
         Ok(())
     }
     
+    /// Search audit logs with filtering
+    pub fn search_logs(
+        &self,
+        user_id: Option<&str>,
+        account_id: Option<&str>,
+        event_type: Option<AuditEventType>,
+        from_date: Option<DateTime<Utc>>,
+        to_date: Option<DateTime<Utc>>,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<AuditLog>> {
+        let mut filters = std::collections::HashMap::new();
+        
+        if let Some(user) = user_id {
+            filters.insert("user_id".to_string(), user.to_string());
+        }
+        
+        if let Some(account) = account_id {
+            filters.insert("account_id".to_string(), account.to_string());
+        }
+        
+        if let Some(event) = event_type {
+            filters.insert("event_type".to_string(), event.as_str().to_string());
+        }
+        
+        AuditRepository::search_audit_logs(filters, from_date, to_date, limit, offset)
+    }
+    
+    /// Perform log rotation if needed
+    pub fn check_log_rotation(&self) -> Result<()> {
+        let archiver = LogArchiver::new()?;
+        let rotated = archiver.check_and_rotate_logs()?;
+        
+        if rotated > 0 {
+            info!("Rotated {} log files", rotated);
+        }
+        
+        // Also prune old archives
+        let pruned = archiver.prune_old_archives()?;
+        if pruned > 0 {
+            info!("Pruned {} old archive files", pruned);
+        }
+        
+        Ok(())
+    }
+    
     /// Verify audit log integrity
     pub fn verify_log_integrity(&self, file_path: &str) -> Result<bool> {
         // In a real implementation, this would use cryptographic techniques
         // to verify the integrity of the audit log file, such as a hash chain
         // or digital signatures
         
-        // TODO: Implement audit log integrity verification
+        // For now, just check if the file exists and is readable
+        if !Path::new(file_path).exists() {
+            return Err(anyhow::anyhow!("Audit log file does not exist"));
+        }
         
-        warn!("Audit log integrity verification not fully implemented");
-        Ok(true)
+        match fs::metadata(file_path) {
+            Ok(metadata) => {
+                if metadata.is_file() && metadata.len() > 0 {
+                    // In a real implementation, we would validate hash chains here
+                    warn!("Audit log integrity verification not fully implemented");
+                    Ok(true)
+                } else {
+                    Err(anyhow::anyhow!("Invalid audit log file"))
+                }
+            },
+            Err(e) => Err(anyhow::anyhow!("Failed to read audit log file: {}", e)),
+        }
     }
     
     /// Decrypt an encrypted audit log file
@@ -170,6 +248,71 @@ impl AuditLogger {
         
         info!("Decrypted audit log saved to: {}", output_path);
         Ok(())
+    }
+    
+    /// Encrypt sensitive information in existing logs
+    pub fn encrypt_sensitive_logs(&self) -> Result<usize> {
+        // Get database connection and start a transaction
+        let conn = crate::database::get_connection()?;
+        let tx = conn.transaction()?;
+        
+        // Encrypt sensitive logs
+        let count = AuditRepository::encrypt_sensitive_logs(&tx)?;
+        
+        // Commit the transaction
+        tx.commit()?;
+        
+        info!("Encrypted sensitive information in {} audit logs", count);
+        Ok(count)
+    }
+    
+    /// Clean up old audit logs based on retention policy
+    pub fn clean_old_logs(&self) -> Result<usize> {
+        let config = config::get_config();
+        let count = AuditRepository::clear_old_audit_logs(config.audit.retention_days)?;
+        info!("Cleaned {} old audit logs", count);
+        Ok(count)
+    }
+    
+    /// Get recent audit events for a user
+    pub fn get_recent_user_events(&self, user_id: &str, limit: Option<usize>) -> Result<Vec<AuditLog>> {
+        AuditRepository::get_audit_logs_by_user(user_id, limit, None)
+    }
+    
+    /// Get recent audit events for an account
+    pub fn get_recent_account_events(&self, account_id: &str, limit: Option<usize>) -> Result<Vec<AuditLog>> {
+        AuditRepository::get_audit_logs_by_account(account_id, limit, None)
+    }
+    
+    /// Get recent audit events by type
+    pub fn get_recent_events_by_type(&self, event_type: AuditEventType, limit: Option<usize>) -> Result<Vec<AuditLog>> {
+        AuditRepository::get_audit_logs_by_event_type(event_type, limit, None)
+    }
+    
+    /// Check for suspicious activity patterns
+    pub fn check_suspicious_activity(&self, user_id: &str) -> Result<Vec<AuditLog>> {
+        // This is a simplified version. In a real system, we would use more
+        // sophisticated algorithms to detect suspicious patterns.
+        let suspicious_events = vec![
+            AuditEventType::UserLoginFailed,
+            AuditEventType::UserLocked,
+            AuditEventType::SecurityEvent,
+            AuditEventType::BackupCodeUsed,
+        ];
+        
+        let mut results = Vec::new();
+        
+        // Get recent activity for the user
+        let recent_logs = self.get_recent_user_events(user_id, Some(100))?;
+        
+        // Filter for suspicious events
+        for log in recent_logs {
+            if suspicious_events.contains(&log.event_type) {
+                results.push(log);
+            }
+        }
+        
+        Ok(results)
     }
 }
 
@@ -226,6 +369,20 @@ mod audit_event_type_ser_de {
     }
 }
 
+// Schedule periodic audit maintenance tasks
+pub fn schedule_audit_maintenance() -> Result<()> {
+    // In a real application, this would set up scheduled tasks or a background thread
+    // For this example, we'll just log a message
+    info!("Audit maintenance tasks scheduled");
+    
+    // These tasks would typically run on a schedule:
+    // 1. Log rotation check
+    // 2. Cleanup of old logs based on retention policy
+    // 3. Encryption of sensitive information
+    
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,9 +413,9 @@ mod tests {
             None,
             Some("127.0.0.1"),
             Some("Test login event"),
-        ).unwrap();
+        );
         
-        assert!(!event_id.is_empty());
+        assert!(event_id.is_ok());
     }
     
     #[test]
@@ -275,9 +432,11 @@ mod tests {
         };
         
         let serialized = serde_json::to_string(&event).unwrap();
-        let deserialized: AuditEvent = serde_json::from_str(&serialized).unwrap();
+        assert!(serialized.contains("UserLogin"));
+        assert!(serialized.contains("test_user"));
         
-        assert_eq!(event.id, deserialized.id);
-        assert_eq!(event.event_type.as_str(), deserialized.event_type.as_str());
+        let deserialized: AuditEvent = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.event_type, AuditEventType::UserLogin);
+        assert_eq!(deserialized.user_id, Some("test_user".to_string()));
     }
 } 

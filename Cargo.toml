@@ -48,6 +48,7 @@ toml = "0.7"
 regex = "1.9"
 qrcode = "0.12"
 base32 = "0.4"
+flate2 = "1.0"
 
 # Testing
 tempfile = "3.8"

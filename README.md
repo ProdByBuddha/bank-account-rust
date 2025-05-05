@@ -4,13 +4,11 @@ A security-focused terminal-based banking system written in Rust. This applicati
 
 ## Features
 
-- AES-256 encryption for all sensitive data
-- JWT+JWE (JOSE) authentication flow
-- Role-based access control (admin/user)
-- Secure SQLite database with encryption
-- Append-only audit trails for compliance
-- Two-factor authentication
-- PCI-DSS compliance checks
+- **Security-First Approach**: Implements industry-standard security measures.
+- **AES-256 Encryption**: All sensitive data is encrypted at rest.
+- **JWT+JWE Authentication**: Secure token-based authentication.
+- **Role-Based Access Control**: Different privileges for different user types.
+- **PCI-DSS Compliance**: Follows payment card industry standards.
 
 ## Installation
 
@@ -96,6 +94,31 @@ secure-bank-cli security compliance-check
 # Export encrypted backup
 secure-bank-cli security backup --output backup.enc
 ```
+
+## Development Metrics
+
+This project includes a commit statistics tracking script to help estimate development time and costs.
+
+### Using the Commit Statistics Tracker
+
+```bash
+# Log statistics for the most recent commit
+./commit_stats.py log --hours 2.5
+
+# Log statistics for a specific commit with custom hourly rate
+./commit_stats.py log --commit abc123 --hours 3.0 --rate 175
+
+# Generate a report of all logged commits
+./commit_stats.py report
+```
+
+The script tracks:
+- Time spent per commit
+- Code changes (files, insertions, deletions)
+- Cost based on hourly rate
+- Project totals for time and cost
+
+Data is stored in `commit_statistics.json` for easy analysis.
 
 ## Security Considerations
 

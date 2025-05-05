@@ -237,4 +237,50 @@ fn store_session_tokens(access_token: &str, refresh_token: &str) -> Result<()> {
     
     // For this example, we'll just return success without actually storing
     Ok(())
+}
+
+/// Handle password change for the authenticated user
+pub fn change_password(auth: &AuthResult) -> Result<()> {
+    let user_id = &auth.user_id;
+    
+    println!("Changing password for your account");
+    
+    // Get the current password for verification
+    let current_password = cli::utils::read_password("Current password: ")?;
+    
+    // Verify the current password
+    let conn = database::get_connection()?;
+    if !security::verify_password(&conn, user_id, &current_password)? {
+        return Err(anyhow!("Current password is incorrect"));
+    }
+    
+    // Get the new password
+    let new_password = cli::utils::read_password("New password: ")?;
+    
+    // Validate password strength
+    match security::validate_password_strength(&new_password) {
+        Ok(_) => {},
+        Err(e) => return Err(anyhow!("Password too weak: {}", e)),
+    }
+    
+    // Confirm the new password
+    let confirm_password = cli::utils::read_password("Confirm new password: ")?;
+    
+    if new_password != confirm_password {
+        return Err(anyhow!("Passwords do not match"));
+    }
+    
+    // Change the password
+    match security::change_password(&conn, user_id, &new_password) {
+        Ok(_) => {
+            println!("✅ Password changed successfully!");
+            Ok(())
+        },
+        Err(security::AuthError::TwoFactorRequired(_)) => {
+            println!("⚠️ Two-factor authentication required to change your password.");
+            println!("Please use 'user verify2fa --operation change_password --code YOUR_CODE' to verify.");
+            Err(anyhow!("Two-factor authentication required"))
+        },
+        Err(e) => Err(anyhow!("Failed to change password: {}", e)),
+    }
 } 

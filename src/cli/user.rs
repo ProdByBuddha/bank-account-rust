@@ -182,4 +182,48 @@ pub fn verify_for_operation(user_id: &str, operation_str: &str, code: &str) -> R
             Err(anyhow!("2FA verification failed: {}", e))
         }
     }
+}
+
+/// Create a new user account
+pub fn create_user(auth: &AuthResult, username: &str, role: &str) -> Result<()> {
+    // Verify admin permission
+    if !auth.permissions.contains(&"admin".to_string()) {
+        return Err(anyhow!("Permission denied: Only administrators can create users"));
+    }
+    
+    // Connect to database
+    let conn = crate::database::get_connection()?;
+    
+    // Validate role
+    let user_role = match role.to_lowercase().as_str() {
+        "admin" => "admin",
+        "user" => "user",
+        _ => return Err(anyhow!("Invalid role. Must be 'admin' or 'user'.")),
+    };
+    
+    // Generate a random temporary password
+    let temp_password = crate::security::generate_secure_password(16)?;
+    
+    // Create the user
+    match crate::user::create_user(&conn, auth, username, &temp_password, user_role) {
+        Ok(user_id) => {
+            println!("✅ User created successfully!");
+            println!("Username: {}", username);
+            println!("User ID: {}", user_id);
+            println!("Role: {}", user_role);
+            println!("\nTemporary password: {}", temp_password);
+            println!("Please share this password securely with the user.");
+            println!("The user will be required to change this password on first login.");
+            Ok(())
+        },
+        Err(crate::user::UserError::AlreadyExists) => {
+            Err(anyhow!("A user with this username already exists"))
+        },
+        Err(crate::user::UserError::TwoFactorRequired(_)) => {
+            println!("⚠️ Two-factor authentication required to create a new user.");
+            println!("Please use 'user verify2fa --operation create_user --code YOUR_CODE' to verify.");
+            Err(anyhow!("Two-factor authentication required"))
+        },
+        Err(e) => Err(anyhow!("Failed to create user: {}", e)),
+    }
 } 

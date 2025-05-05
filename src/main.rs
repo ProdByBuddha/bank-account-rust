@@ -557,11 +557,63 @@ fn main() {
             match command {
                 UserCommands::Create { username, role } => {
                     println!("Creating new user: {} with role: {}", username, role);
-                    // TODO: Implement user creation
+                    
+                    // Get authentication token for admin user
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::user::create_user(&auth, username, role) {
+                                        error!("Error creating user: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in as an admin to create users.");
+                            process::exit(1);
+                        }
+                    }
                 }
                 UserCommands::ChangePassword {} => {
                     println!("Changing password");
-                    // TODO: Implement password change
+                    
+                    // Get authentication token
+                    match get_auth_token() {
+                        Some(token) => {
+                            let conn = database::get_connection().unwrap_or_else(|e| {
+                                error!("Failed to connect to the database: {}", e);
+                                process::exit(1);
+                            });
+                            
+                            match security::authenticate(&conn, &token) {
+                                Ok(auth) => {
+                                    if let Err(e) = cli::auth::change_password(&auth) {
+                                        error!("Error changing password: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("Authentication error: {}", e);
+                                    process::exit(1);
+                                }
+                            }
+                        },
+                        None => {
+                            println!("You must be logged in to change your password.");
+                            process::exit(1);
+                        }
+                    }
                 }
                 UserCommands::Enable2FA {} => {
                     // Mock user ID (in a real app, this would be obtained from the authenticated session)
@@ -698,706 +750,7 @@ fn main() {
             }
         }
         Commands::Account { command } => {
-            match command {
-                AccountCommands::Create { r#type } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::account::create_new_account(&auth, r#type) {
-                                        println!("Error creating account: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to create an account.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Deposit { id, amount, details } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    // Using the process_transaction function from account module
-                                    match crate::account::process_transaction(
-                                        &conn, 
-                                        &auth, 
-                                        id, 
-                                        crate::database::models::TransactionType::Deposit, 
-                                        *amount,
-                                        details
-                                    ) {
-                                        Ok(transaction) => {
-                                            println!("✅ Deposit successful!");
-                                            println!("Transaction ID: {}", transaction.id);
-                                            println!("Amount: ${:.2}", transaction.amount);
-                                            println!("New balance: ${:.2}", 
-                                                match crate::account::get_account(&conn, &auth, id) {
-                                                    Ok(account) => account.balance,
-                                                    Err(_) => 0.0, // Shouldn't happen
-                                                }
-                                            );
-                                        },
-                                        Err(e) => {
-                                            println!("Error processing deposit: {}", e);
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to make a deposit.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Withdraw { id, amount, details } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    // Using the process_transaction function from account module
-                                    match crate::account::process_transaction(
-                                        &conn, 
-                                        &auth, 
-                                        id, 
-                                        crate::database::models::TransactionType::Withdrawal, 
-                                        *amount,
-                                        details
-                                    ) {
-                                        Ok(transaction) => {
-                                            println!("✅ Withdrawal successful!");
-                                            println!("Transaction ID: {}", transaction.id);
-                                            println!("Amount: ${:.2}", transaction.amount);
-                                            println!("New balance: ${:.2}", 
-                                                match crate::account::get_account(&conn, &auth, id) {
-                                                    Ok(account) => account.balance,
-                                                    Err(_) => 0.0, // Shouldn't happen
-                                                }
-                                            );
-                                        },
-                                        Err(e) => {
-                                            println!("Error processing withdrawal: {}", e);
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to make a withdrawal.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Transfer { from, to, amount, details } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    // Using the transfer_funds function from account module
-                                    match crate::account::transfer_funds(
-                                        &conn, 
-                                        &auth, 
-                                        from, 
-                                        to, 
-                                        *amount,
-                                        details
-                                    ) {
-                                        Ok(transaction) => {
-                                            println!("✅ Transfer successful!");
-                                            println!("Transaction ID: {}", transaction.id);
-                                            println!("Amount: ${:.2}", transaction.amount);
-                                            println!("From account: {}", from);
-                                            println!("To account: {}", to);
-                                        },
-                                        Err(e) => {
-                                            println!("Error processing transfer: {}", e);
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to make a transfer.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Balance { id } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::account::get_account_details(&auth, id) {
-                                        println!("Error getting account balance: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to view account balance.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::History { id, limit, offset, start_date, end_date } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::account::display_transaction_history(
-                                        &auth, 
-                                        &id, 
-                                        limit, 
-                                        offset, 
-                                        start_date.as_deref(), 
-                                        end_date.as_deref()
-                                    ) {
-                                        println!("Error viewing transaction history: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to view transaction history.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Receipt { id } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::account::get_transaction_receipt(&auth, &id) {
-                                        println!("Error retrieving transaction receipt: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to view transaction receipts.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Schedule { id, r#type, amount, date, to, details } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    // Parse transaction type
-                                    let transaction_type = match r#type.to_lowercase().as_str() {
-                                        "deposit" => database::models::TransactionType::Deposit,
-                                        "withdrawal" => database::models::TransactionType::Withdrawal,
-                                        "transfer" => database::models::TransactionType::Transfer,
-                                        _ => {
-                                            println!("Invalid transaction type. Must be deposit, withdrawal, or transfer.");
-                                            process::exit(1);
-                                        }
-                                    };
-                                    
-                                    // Parse scheduled date
-                                    let scheduled_date = match chrono::NaiveDateTime::parse_from_str(&date, "%Y-%m-%d %H:%M:%S") {
-                                        Ok(dt) => chrono::DateTime::from_naive_utc_and_offset(dt, chrono::Utc),
-                                        Err(_) => {
-                                            println!("Invalid date format. Please use YYYY-MM-DD HH:MM:SS format.");
-                                            process::exit(1);
-                                        }
-                                    };
-                                    
-                                    // Validate transfer has a destination account
-                                    if transaction_type == database::models::TransactionType::Transfer && to.is_none() {
-                                        println!("Transfer transactions require a destination account (--to).");
-                                        process::exit(1);
-                                    }
-                                    
-                                    // Schedule the transaction
-                                    match account::schedule_transaction(
-                                        &conn,
-                                        &auth,
-                                        &id,
-                                        transaction_type,
-                                        amount,
-                                        scheduled_date,
-                                        details.as_deref(),
-                                        to.as_deref()
-                                    ) {
-                                        Ok(scheduled_id) => {
-                                            println!("✅ Transaction scheduled successfully!");
-                                            println!("Scheduled ID: {}", scheduled_id);
-                                            println!("Account: {}", id);
-                                            println!("Type: {}", r#type);
-                                            println!("Amount: ${:.2}", amount);
-                                            println!("Scheduled for: {}", date);
-                                            if let Some(to_account) = to {
-                                                println!("To account: {}", to_account);
-                                            }
-                                        },
-                                        Err(e) => {
-                                            println!("Error scheduling transaction: {}", e);
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to schedule transactions.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Recurring { id, r#type, amount, frequency, start_date, end_date, to, details } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    // Parse transaction type
-                                    let transaction_type = match r#type.to_lowercase().as_str() {
-                                        "deposit" => database::models::TransactionType::Deposit,
-                                        "withdrawal" => database::models::TransactionType::Withdrawal,
-                                        "transfer" => database::models::TransactionType::Transfer,
-                                        _ => {
-                                            println!("Invalid transaction type. Must be deposit, withdrawal, or transfer.");
-                                            process::exit(1);
-                                        }
-                                    };
-                                    
-                                    // Parse frequency
-                                    let recurrence_frequency = match frequency.to_lowercase().as_str() {
-                                        "daily" => account::RecurrenceFrequency::Daily,
-                                        "weekly" => account::RecurrenceFrequency::Weekly,
-                                        "biweekly" => account::RecurrenceFrequency::BiWeekly,
-                                        "monthly" => account::RecurrenceFrequency::Monthly,
-                                        "quarterly" => account::RecurrenceFrequency::Quarterly,
-                                        "yearly" => account::RecurrenceFrequency::Yearly,
-                                        _ => {
-                                            println!("Invalid frequency. Must be daily, weekly, biweekly, monthly, quarterly, or yearly.");
-                                            process::exit(1);
-                                        }
-                                    };
-                                    
-                                    // Parse dates
-                                    let start = match chrono::NaiveDate::parse_from_str(&start_date, "%Y-%m-%d") {
-                                        Ok(date) => {
-                                            // Convert to DateTime with midnight time
-                                            let naive_dt = date.and_hms_opt(0, 0, 0).unwrap();
-                                            chrono::DateTime::from_naive_utc_and_offset(naive_dt, chrono::Utc)
-                                        },
-                                        Err(_) => {
-                                            println!("Invalid start date format. Please use YYYY-MM-DD format.");
-                                            process::exit(1);
-                                        }
-                                    };
-                                    
-                                    let end = if let Some(end_str) = end_date.as_deref() {
-                                        match chrono::NaiveDate::parse_from_str(end_str, "%Y-%m-%d") {
-                                            Ok(date) => {
-                                                // Convert to DateTime with end of day time
-                                                let naive_dt = date.and_hms_opt(23, 59, 59).unwrap();
-                                                Some(chrono::DateTime::from_naive_utc_and_offset(naive_dt, chrono::Utc))
-                                            },
-                                            Err(_) => {
-                                                println!("Invalid end date format. Please use YYYY-MM-DD format.");
-                                                process::exit(1);
-                                            }
-                                        }
-                                    } else {
-                                        None
-                                    };
-                                    
-                                    // Validate transfer has a destination account
-                                    if transaction_type == database::models::TransactionType::Transfer && to.is_none() {
-                                        println!("Transfer transactions require a destination account (--to).");
-                                        process::exit(1);
-                                    }
-                                    
-                                    // Create recurring transaction
-                                    match account::create_recurring_transaction(
-                                        &conn,
-                                        &auth,
-                                        &id,
-                                        transaction_type,
-                                        amount,
-                                        recurrence_frequency,
-                                        start,
-                                        end,
-                                        details.as_deref(),
-                                        to.as_deref()
-                                    ) {
-                                        Ok(recurring_id) => {
-                                            println!("✅ Recurring transaction created successfully!");
-                                            println!("Recurring ID: {}", recurring_id);
-                                            println!("Account: {}", id);
-                                            println!("Type: {}", r#type);
-                                            println!("Amount: ${:.2}", amount);
-                                            println!("Frequency: {}", frequency);
-                                            println!("Start date: {}", start_date);
-                                            if let Some(end_str) = end_date {
-                                                println!("End date: {}", end_str);
-                                            } else {
-                                                println!("End date: Never (until cancelled)");
-                                            }
-                                            if let Some(to_account) = to {
-                                                println!("To account: {}", to_account);
-                                            }
-                                        },
-                                        Err(e) => {
-                                            println!("Error creating recurring transaction: {}", e);
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to create recurring transactions.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::CancelScheduled { id } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    match account::cancel_scheduled_transaction(&conn, &auth, &id) {
-                                        Ok(()) => {
-                                            println!("✅ Scheduled transaction cancelled successfully!");
-                                            println!("Scheduled transaction ID: {}", id);
-                                        },
-                                        Err(e) => {
-                                            println!("Error cancelling scheduled transaction: {}", e);
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to cancel scheduled transactions.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::CancelRecurring { id } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    match account::cancel_recurring_transaction(&conn, &auth, &id) {
-                                        Ok(()) => {
-                                            println!("✅ Recurring transaction cancelled successfully!");
-                                            println!("Recurring transaction ID: {}", id);
-                                        },
-                                        Err(e) => {
-                                            println!("Error cancelling recurring transaction: {}", e);
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to cancel recurring transactions.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::ProcessScheduled {} => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    // Check if user has admin permissions
-                                    if !auth.permissions.contains(&"admin".to_string()) && 
-                                       !auth.permissions.contains(&"process_scheduled_transactions".to_string()) {
-                                        println!("Permission denied: Only admins or users with process_scheduled_transactions permission can run this command.");
-                                        process::exit(1);
-                                    }
-                                    
-                                    match account::process_scheduled_transactions(&conn) {
-                                        Ok(count) => {
-                                            println!("✅ Processed {} scheduled transactions", count);
-                                        },
-                                        Err(e) => {
-                                            println!("Error processing scheduled transactions: {}", e);
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to process scheduled transactions.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::List { user_id } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::account::list_accounts(&auth, user_id) {
-                                        println!("Error listing accounts: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to list accounts.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Status { id, status } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::account::update_status(&auth, &id, &status) {
-                                        println!("Error updating account status: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to update account status.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Interest { id } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::account::calc_interest(&auth, &id) {
-                                        println!("Error calculating interest: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to calculate interest.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Link { primary, accounts } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::account::link_user_accounts(&auth, &primary, &accounts) {
-                                        println!("Error linking accounts: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to link accounts.");
-                            process::exit(1);
-                        }
-                    }
-                },
-                AccountCommands::Export { id, output, format, start_date, end_date, limit } => {
-                    match get_auth_token() {
-                        Some(token) => {
-                            let conn = database::get_connection().unwrap_or_else(|e| {
-                                error!("Failed to connect to the database: {}", e);
-                                process::exit(1);
-                            });
-                            
-                            match security::authenticate(&conn, &token) {
-                                Ok(auth) => {
-                                    if let Err(e) = cli::account::export_transaction_history(
-                                        &auth, 
-                                        &id, 
-                                        &format, 
-                                        &output, 
-                                        start_date.as_deref(), 
-                                        end_date.as_deref(),
-                                        limit
-                                    ) {
-                                        println!("Error exporting transaction history: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("Authentication error: {}", e);
-                                    process::exit(1);
-                                }
-                            }
-                        },
-                        None => {
-                            println!("You must be logged in to export transaction history.");
-                            process::exit(1);
-                        }
-                    }
-                },
-            }
-        }
-        Commands::Security { command } => {
-            match command {
-                SecurityCommands::ComplianceCheck {} => {
-                    println!("Running compliance check");
-                    // TODO: Implement compliance check
-                }
-                SecurityCommands::Backup { output } => {
-                    println!("Creating encrypted backup: {}", output);
-                    // TODO: Implement backup
-                }
-                SecurityCommands::Restore { input } => {
-                    println!("Restoring from encrypted backup: {}", input);
-                    // TODO: Implement restore
-                }
-            }
-        }
-        Commands::Audit { command } => {
+            // Get authentication token
             match get_auth_token() {
                 Some(token) => {
                     let conn = database::get_connection().unwrap_or_else(|e| {
@@ -1407,24 +760,310 @@ fn main() {
                     
                     match security::authenticate(&conn, &token) {
                         Ok(auth) => {
-                            // Use the audit command handler
-                            let args_matches = cli::utils::convert_to_argmatches();
-                            if let Some(audit_matches) = args_matches.subcommand_matches("audit") {
-                                if let Err(e) = cli::audit::handle_audit_command(audit_matches, &auth) {
-                                    println!("Error handling audit command: {}", e);
-                                }
-                            } else {
-                                println!("Invalid audit command");
+                            match command {
+                                AccountCommands::Create { r#type } => {
+                                    if let Err(e) = cli::account::create_new_account(&auth, r#type) {
+                                        error!("Error creating account: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Deposit { id, amount, details } => {
+                                    if let Err(e) = cli::account::deposit(&auth, &id, amount, details.as_deref()) {
+                                        error!("Error depositing funds: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Withdraw { id, amount, details } => {
+                                    if let Err(e) = cli::account::withdraw(&auth, &id, amount, details.as_deref()) {
+                                        error!("Error withdrawing funds: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Transfer { from, to, amount, details } => {
+                                    if let Err(e) = cli::account::transfer(&auth, &from, &to, amount, details.as_deref()) {
+                                        error!("Error transferring funds: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Balance { id } => {
+                                    if let Err(e) = cli::account::get_account_details(&auth, &id) {
+                                        error!("Error getting account balance: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::History { id, limit, offset, start_date, end_date } => {
+                                    if let Err(e) = cli::account::display_transaction_history(
+                                        &auth, 
+                                        &id, 
+                                        limit, 
+                                        offset, 
+                                        start_date.as_deref(), 
+                                        end_date.as_deref()
+                                    ) {
+                                        error!("Error displaying transaction history: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Receipt { id } => {
+                                    if let Err(e) = cli::account::get_transaction_receipt(&auth, &id) {
+                                        error!("Error getting transaction receipt: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Export { id, output, format, start_date, end_date, limit } => {
+                                    if let Err(e) = cli::account::export_transaction_history(
+                                        &auth, 
+                                        &id, 
+                                        &format, 
+                                        &output, 
+                                        start_date.as_deref(), 
+                                        end_date.as_deref(), 
+                                        limit
+                                    ) {
+                                        error!("Error exporting transaction history: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Schedule { id, r#type, amount, date, to, details } => {
+                                    if let Err(e) = cli::account::schedule_transaction(
+                                        &auth, 
+                                        &id, 
+                                        &r#type, 
+                                        amount, 
+                                        &date, 
+                                        to.as_deref(), 
+                                        details.as_deref()
+                                    ) {
+                                        error!("Error scheduling transaction: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Recurring { id, r#type, amount, frequency, start_date, end_date, to, details } => {
+                                    if let Err(e) = cli::account::create_recurring_transaction(
+                                        &auth, 
+                                        &id, 
+                                        &r#type, 
+                                        amount, 
+                                        &frequency, 
+                                        &start_date, 
+                                        end_date.as_deref(), 
+                                        to.as_deref(), 
+                                        details.as_deref()
+                                    ) {
+                                        error!("Error creating recurring transaction: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::CancelScheduled { id } => {
+                                    if let Err(e) = cli::account::cancel_scheduled_transaction(&auth, &id) {
+                                        error!("Error canceling scheduled transaction: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::CancelRecurring { id } => {
+                                    if let Err(e) = cli::account::cancel_recurring_transaction(&auth, &id) {
+                                        error!("Error canceling recurring transaction: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::ProcessScheduled {} => {
+                                    if let Err(e) = cli::account::process_scheduled_transactions(&auth) {
+                                        error!("Error processing scheduled transactions: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::List { user_id } => {
+                                    if let Err(e) = cli::account::list_accounts(&auth, user_id.as_deref()) {
+                                        error!("Error listing accounts: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Status { id, status } => {
+                                    if let Err(e) = cli::account::update_status(&auth, &id, &status) {
+                                        error!("Error updating account status: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Interest { id } => {
+                                    if let Err(e) = cli::account::calc_interest(&auth, &id) {
+                                        error!("Error calculating interest: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
+                                AccountCommands::Link { primary, accounts } => {
+                                    if let Err(e) = cli::account::link_user_accounts(&auth, &primary, &accounts) {
+                                        error!("Error linking accounts: {}", e);
+                                        process::exit(1);
+                                    }
+                                },
                             }
                         },
                         Err(e) => {
-                            println!("Authentication error: {}", e);
+                            error!("Authentication error: {}", e);
                             process::exit(1);
                         }
                     }
                 },
                 None => {
-                    println!("You must be logged in to use audit commands.");
+                    println!("You must be logged in to perform account operations.");
+                    process::exit(1);
+                }
+            }
+        }
+        Commands::Security { command } => {
+            // Get authentication token
+            match get_auth_token() {
+                Some(token) => {
+                    let conn = database::get_connection().unwrap_or_else(|e| {
+                        error!("Failed to connect to the database: {}", e);
+                        process::exit(1);
+                    });
+                    
+                    match security::authenticate(&conn, &token) {
+                        Ok(auth) => {
+                            match command {
+                                SecurityCommands::ComplianceCheck {} => {
+                                    match cli::audit::run_compliance_check(&auth) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error running compliance check: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                                SecurityCommands::Backup { output } => {
+                                    match cli::audit::create_backup(&auth, &output) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error creating backup: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                                SecurityCommands::Restore { input } => {
+                                    match cli::audit::restore_from_backup(&auth, &input) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error restoring from backup: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                        Err(e) => {
+                            error!("Authentication error: {}", e);
+                            process::exit(1);
+                        }
+                    }
+                },
+                None => {
+                    println!("You must be logged in to perform security operations.");
+                    process::exit(1);
+                }
+            }
+        }
+        Commands::Audit { command } => {
+            // Get authentication token
+            match get_auth_token() {
+                Some(token) => {
+                    let conn = database::get_connection().unwrap_or_else(|e| {
+                        error!("Failed to connect to the database: {}", e);
+                        process::exit(1);
+                    });
+                    
+                    match security::authenticate(&conn, &token) {
+                        Ok(auth) => {
+                            match command {
+                                AuditCommands::Search { user_id, account_id, event_type, from_date, to_date, limit, text } => {
+                                    match cli::audit::search_audit_logs(
+                                        &auth,
+                                        user_id.as_deref(),
+                                        account_id.as_deref(),
+                                        event_type.as_deref(),
+                                        from_date.as_deref(),
+                                        to_date.as_deref(),
+                                        *limit,
+                                        text.as_deref()
+                                    ) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error searching audit logs: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                                AuditCommands::Rotate {} => {
+                                    match cli::audit::rotate_audit_logs(&auth) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error rotating audit logs: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                                AuditCommands::Purge { confirm } => {
+                                    match cli::audit::purge_old_audit_logs(&auth, *confirm) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error purging old audit logs: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                                AuditCommands::EncryptSensitive {} => {
+                                    match cli::audit::encrypt_sensitive_audit_data(&auth) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error encrypting sensitive audit data: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                                AuditCommands::Export { output, format, user_id, from_date, to_date } => {
+                                    match cli::audit::export_audit_logs(
+                                        &auth,
+                                        &output,
+                                        &format,
+                                        user_id.as_deref(),
+                                        from_date.as_deref(),
+                                        to_date.as_deref()
+                                    ) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error exporting audit logs: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                                AuditCommands::Decrypt { input, output } => {
+                                    match cli::audit::decrypt_audit_log_archive(&auth, &input, &output) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error decrypting audit log archive: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                                AuditCommands::Suspicious { user_id } => {
+                                    match cli::audit::check_suspicious_activity(&auth, &user_id) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            error!("Error checking for suspicious activity: {}", e);
+                                            process::exit(1);
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                        Err(e) => {
+                            error!("Authentication error: {}", e);
+                            process::exit(1);
+                        }
+                    }
+                },
+                None => {
+                    println!("You must be logged in to perform audit operations.");
                     process::exit(1);
                 }
             }

@@ -519,4 +519,367 @@ pub fn get_transaction_receipt(auth: &AuthResult, transaction_id: &str) -> Resul
         },
         Err(e) => Err(anyhow!("Failed to retrieve transaction receipt: {}", e)),
     }
+}
+
+/// Deposit funds into an account
+pub fn deposit(auth: &AuthResult, account_id: &str, amount: f64, details: Option<&str>) -> Result<()> {
+    // Connect to database
+    let conn = crate::database::get_connection()?;
+    
+    // Validate amount
+    if amount <= 0.0 {
+        return Err(anyhow!("Deposit amount must be greater than zero."));
+    }
+    
+    // Process the deposit
+    match crate::account::process_transaction(
+        &conn, 
+        auth, 
+        account_id, 
+        crate::database::models::TransactionType::Deposit, 
+        amount,
+        details
+    ) {
+        Ok(transaction) => {
+            println!("✅ Deposit successful!");
+            println!("Transaction ID: {}", transaction.id);
+            println!("Amount: ${:.2}", transaction.amount);
+            
+            // Get current balance
+            match crate::account::get_account(&conn, auth, account_id) {
+                Ok(account) => {
+                    println!("New balance: ${:.2}", account.balance);
+                },
+                Err(_) => {} // Already handled above
+            }
+            
+            Ok(())
+        },
+        Err(AccountError::TwoFactorRequired(_)) => {
+            println!("⚠️ Two-factor authentication required for this deposit.");
+            println!("Please use 'user verify2fa --operation deposit_funds --code YOUR_CODE' to verify.");
+            Err(anyhow!("Two-factor authentication required"))
+        },
+        Err(e) => Err(anyhow!("Failed to process deposit: {}", e)),
+    }
+}
+
+/// Withdraw funds from an account
+pub fn withdraw(auth: &AuthResult, account_id: &str, amount: f64, details: Option<&str>) -> Result<()> {
+    // Connect to database
+    let conn = crate::database::get_connection()?;
+    
+    // Validate amount
+    if amount <= 0.0 {
+        return Err(anyhow!("Withdrawal amount must be greater than zero."));
+    }
+    
+    // Process the withdrawal
+    match crate::account::process_transaction(
+        &conn, 
+        auth, 
+        account_id, 
+        crate::database::models::TransactionType::Withdrawal, 
+        amount,
+        details
+    ) {
+        Ok(transaction) => {
+            println!("✅ Withdrawal successful!");
+            println!("Transaction ID: {}", transaction.id);
+            println!("Amount: ${:.2}", transaction.amount);
+            
+            // Get current balance
+            match crate::account::get_account(&conn, auth, account_id) {
+                Ok(account) => {
+                    println!("New balance: ${:.2}", account.balance);
+                },
+                Err(_) => {} // Already handled above
+            }
+            
+            Ok(())
+        },
+        Err(AccountError::InsufficientFunds) => {
+            println!("❌ Insufficient funds for this withdrawal.");
+            Err(anyhow!("Insufficient funds"))
+        },
+        Err(AccountError::TwoFactorRequired(_)) => {
+            println!("⚠️ Two-factor authentication required for this withdrawal.");
+            println!("Please use 'user verify2fa --operation withdraw_funds --code YOUR_CODE' to verify.");
+            Err(anyhow!("Two-factor authentication required"))
+        },
+        Err(e) => Err(anyhow!("Failed to process withdrawal: {}", e)),
+    }
+}
+
+/// Transfer funds between accounts
+pub fn transfer(auth: &AuthResult, from_account_id: &str, to_account_id: &str, amount: f64, details: Option<&str>) -> Result<()> {
+    // Connect to database
+    let conn = crate::database::get_connection()?;
+    
+    // Validate amount
+    if amount <= 0.0 {
+        return Err(anyhow!("Transfer amount must be greater than zero."));
+    }
+    
+    // Process the transfer
+    match crate::account::transfer_funds(
+        &conn, 
+        auth, 
+        from_account_id, 
+        to_account_id, 
+        amount,
+        details
+    ) {
+        Ok(transaction) => {
+            println!("✅ Transfer successful!");
+            println!("Transaction ID: {}", transaction.id);
+            println!("Amount: ${:.2}", transaction.amount);
+            println!("From account: {}", from_account_id);
+            println!("To account: {}", to_account_id);
+            
+            // Get current balance of source account
+            match crate::account::get_account(&conn, auth, from_account_id) {
+                Ok(account) => {
+                    println!("New source account balance: ${:.2}", account.balance);
+                },
+                Err(_) => {} // Already handled above
+            }
+            
+            Ok(())
+        },
+        Err(AccountError::InsufficientFunds) => {
+            println!("❌ Insufficient funds for this transfer.");
+            Err(anyhow!("Insufficient funds"))
+        },
+        Err(AccountError::TwoFactorRequired(_)) => {
+            println!("⚠️ Two-factor authentication required for this transfer.");
+            println!("Please use 'user verify2fa --operation transfer_funds --code YOUR_CODE' to verify.");
+            Err(anyhow!("Two-factor authentication required"))
+        },
+        Err(AccountError::SameAccount) => {
+            println!("❌ Cannot transfer to the same account.");
+            Err(anyhow!("Source and destination accounts are the same"))
+        },
+        Err(e) => Err(anyhow!("Failed to process transfer: {}", e)),
+    }
+}
+
+/// Schedule a future transaction
+pub fn schedule_transaction(
+    auth: &AuthResult,
+    account_id: &str,
+    transaction_type_str: &str,
+    amount: f64,
+    date_str: &str,
+    to_account_id: Option<&str>,
+    details: Option<&str>
+) -> Result<()> {
+    // Connect to database
+    let conn = crate::database::get_connection()?;
+    
+    // Parse transaction type
+    let transaction_type = match transaction_type_str.to_lowercase().as_str() {
+        "deposit" => crate::database::models::TransactionType::Deposit,
+        "withdrawal" => crate::database::models::TransactionType::Withdrawal,
+        "transfer" => crate::database::models::TransactionType::Transfer,
+        _ => return Err(anyhow!("Invalid transaction type. Must be deposit, withdrawal, or transfer.")),
+    };
+    
+    // Parse scheduled date
+    let scheduled_date = match chrono::NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S") {
+        Ok(dt) => chrono::DateTime::from_naive_utc_and_offset(dt, chrono::Utc),
+        Err(_) => return Err(anyhow!("Invalid date format. Please use YYYY-MM-DD HH:MM:SS format.")),
+    };
+    
+    // Validate transfer has a destination account
+    if transaction_type == crate::database::models::TransactionType::Transfer && to_account_id.is_none() {
+        return Err(anyhow!("Transfer transactions require a destination account (--to)."));
+    }
+    
+    // Schedule the transaction
+    match crate::account::schedule_transaction(
+        &conn,
+        auth, 
+        account_id, 
+        transaction_type,
+        amount, 
+        scheduled_date,
+        details,
+        to_account_id
+    ) {
+        Ok(scheduled_id) => {
+            println!("✅ Transaction scheduled successfully!");
+            println!("Scheduled ID: {}", scheduled_id);
+            println!("Account: {}", account_id);
+            println!("Type: {}", transaction_type_str);
+            println!("Amount: ${:.2}", amount);
+            println!("Scheduled for: {}", date_str);
+            if let Some(to_account) = to_account_id {
+                println!("To account: {}", to_account);
+            }
+            Ok(())
+        },
+        Err(AccountError::TwoFactorRequired(_)) => {
+            println!("⚠️ Two-factor authentication required to schedule a transaction.");
+            println!("Please use 'user verify2fa --operation schedule_transaction --code YOUR_CODE' to verify.");
+            Err(anyhow!("Two-factor authentication required"))
+        },
+        Err(e) => Err(anyhow!("Failed to schedule transaction: {}", e)),
+    }
+}
+
+/// Create a recurring transaction
+pub fn create_recurring_transaction(
+    auth: &AuthResult,
+    account_id: &str,
+    transaction_type_str: &str,
+    amount: f64,
+    frequency_str: &str,
+    start_date_str: &str,
+    end_date_str: Option<&str>,
+    to_account_id: Option<&str>,
+    details: Option<&str>
+) -> Result<()> {
+    // Connect to database
+    let conn = crate::database::get_connection()?;
+    
+    // Parse transaction type
+    let transaction_type = match transaction_type_str.to_lowercase().as_str() {
+        "deposit" => crate::database::models::TransactionType::Deposit,
+        "withdrawal" => crate::database::models::TransactionType::Withdrawal,
+        "transfer" => crate::database::models::TransactionType::Transfer,
+        _ => return Err(anyhow!("Invalid transaction type. Must be deposit, withdrawal, or transfer.")),
+    };
+    
+    // Parse frequency
+    let recurrence_frequency = match frequency_str.to_lowercase().as_str() {
+        "daily" => crate::account::RecurrenceFrequency::Daily,
+        "weekly" => crate::account::RecurrenceFrequency::Weekly,
+        "biweekly" => crate::account::RecurrenceFrequency::BiWeekly,
+        "monthly" => crate::account::RecurrenceFrequency::Monthly,
+        "quarterly" => crate::account::RecurrenceFrequency::Quarterly,
+        "yearly" => crate::account::RecurrenceFrequency::Yearly,
+        _ => return Err(anyhow!("Invalid frequency. Must be daily, weekly, biweekly, monthly, quarterly, or yearly.")),
+    };
+    
+    // Parse dates
+    let start = match chrono::NaiveDate::parse_from_str(start_date_str, "%Y-%m-%d") {
+        Ok(date) => {
+            // Convert to DateTime with midnight time
+            let naive_dt = date.and_hms_opt(0, 0, 0).unwrap();
+            chrono::DateTime::from_naive_utc_and_offset(naive_dt, chrono::Utc)
+        },
+        Err(_) => return Err(anyhow!("Invalid start date format. Please use YYYY-MM-DD format.")),
+    };
+    
+    let end = if let Some(end_date) = end_date_str {
+        match chrono::NaiveDate::parse_from_str(end_date, "%Y-%m-%d") {
+            Ok(date) => {
+                // Convert to DateTime with end of day time
+                let naive_dt = date.and_hms_opt(23, 59, 59).unwrap();
+                Some(chrono::DateTime::from_naive_utc_and_offset(naive_dt, chrono::Utc))
+            },
+            Err(_) => return Err(anyhow!("Invalid end date format. Please use YYYY-MM-DD format.")),
+        }
+    } else {
+        None
+    };
+    
+    // Validate transfer has a destination account
+    if transaction_type == crate::database::models::TransactionType::Transfer && to_account_id.is_none() {
+        return Err(anyhow!("Transfer transactions require a destination account (--to)."));
+    }
+    
+    // Create recurring transaction
+    match crate::account::create_recurring_transaction(
+        &conn,
+        auth, 
+        account_id, 
+        transaction_type,
+        amount, 
+        recurrence_frequency,
+        start,
+        end,
+        details,
+        to_account_id
+    ) {
+        Ok(recurring_id) => {
+            println!("✅ Recurring transaction created successfully!");
+            println!("Recurring ID: {}", recurring_id);
+            println!("Account: {}", account_id);
+            println!("Type: {}", transaction_type_str);
+            println!("Amount: ${:.2}", amount);
+            println!("Frequency: {}", frequency_str);
+            println!("Start date: {}", start_date_str);
+            if let Some(end_date) = end_date_str {
+                println!("End date: {}", end_date);
+            } else {
+                println!("End date: Never (until cancelled)");
+            }
+            if let Some(to_account) = to_account_id {
+                println!("To account: {}", to_account);
+            }
+            Ok(())
+        },
+        Err(AccountError::TwoFactorRequired(_)) => {
+            println!("⚠️ Two-factor authentication required to create a recurring transaction.");
+            println!("Please use 'user verify2fa --operation create_recurring_transaction --code YOUR_CODE' to verify.");
+            Err(anyhow!("Two-factor authentication required"))
+        },
+        Err(e) => Err(anyhow!("Failed to create recurring transaction: {}", e)),
+    }
+}
+
+/// Cancel a scheduled transaction
+pub fn cancel_scheduled_transaction(auth: &AuthResult, scheduled_id: &str) -> Result<()> {
+    // Connect to database
+    let conn = crate::database::get_connection()?;
+    
+    match crate::account::cancel_scheduled_transaction(&conn, auth, scheduled_id) {
+        Ok(()) => {
+            println!("✅ Scheduled transaction cancelled successfully!");
+            println!("Scheduled transaction ID: {}", scheduled_id);
+            Ok(())
+        },
+        Err(AccountError::NotFound) => Err(anyhow!("Scheduled transaction not found")),
+        Err(AccountError::AuthorizationError) => Err(anyhow!("Not authorized to cancel this scheduled transaction")),
+        Err(e) => Err(anyhow!("Failed to cancel scheduled transaction: {}", e)),
+    }
+}
+
+/// Cancel a recurring transaction
+pub fn cancel_recurring_transaction(auth: &AuthResult, recurring_id: &str) -> Result<()> {
+    // Connect to database
+    let conn = crate::database::get_connection()?;
+    
+    match crate::account::cancel_recurring_transaction(&conn, auth, recurring_id) {
+        Ok(()) => {
+            println!("✅ Recurring transaction cancelled successfully!");
+            println!("Recurring transaction ID: {}", recurring_id);
+            Ok(())
+        },
+        Err(AccountError::NotFound) => Err(anyhow!("Recurring transaction not found")),
+        Err(AccountError::AuthorizationError) => Err(anyhow!("Not authorized to cancel this recurring transaction")),
+        Err(e) => Err(anyhow!("Failed to cancel recurring transaction: {}", e)),
+    }
+}
+
+/// Process scheduled transactions
+pub fn process_scheduled_transactions(auth: &AuthResult) -> Result<()> {
+    // Connect to database
+    let conn = crate::database::get_connection()?;
+    
+    // Check if user has admin permissions
+    if !auth.permissions.contains(&"admin".to_string()) && 
+       !auth.permissions.contains(&"process_scheduled_transactions".to_string()) {
+        return Err(anyhow!("Permission denied: Only admins or users with process_scheduled_transactions permission can run this command."));
+    }
+    
+    match crate::account::process_scheduled_transactions(&conn) {
+        Ok(count) => {
+            println!("✅ Processed {} scheduled transactions", count);
+            Ok(())
+        },
+        Err(e) => Err(anyhow!("Failed to process scheduled transactions: {}", e)),
+    }
 } 

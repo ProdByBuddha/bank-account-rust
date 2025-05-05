@@ -135,10 +135,10 @@ mod tests {
         // Create a temporary database
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test_migration.db");
-        let conn = Connection::open(&db_path).unwrap();
+        let mut conn = Connection::open(&db_path).unwrap();
         
         // Run migrations
-        run_migrations(&conn).unwrap();
+        run_migrations(&mut conn).unwrap();
         
         // Check final version
         let version = get_database_version(&conn).unwrap();

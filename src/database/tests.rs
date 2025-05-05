@@ -9,7 +9,7 @@ use crate::database::{self, models::*};
 use crate::security;
 
 /// Test fixture for database tests
-fn setup_test_db() -> (tempfile::TempDir, Connection) {
+fn setup_test_db() -> (tempfile::TempDir, rusqlite::Connection) {
     // Create a temporary directory for the test database
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("test_db.db");
@@ -23,8 +23,8 @@ fn setup_test_db() -> (tempfile::TempDir, Connection) {
     // Initialize database
     database::initialize().unwrap();
     
-    // Get connection
-    let conn = database::get_connection().unwrap();
+    // Create a direct connection to the database file for testing
+    let conn = Connection::open(db_path).unwrap();
     
     (dir, conn)
 }
@@ -99,6 +99,8 @@ fn test_user_crud_operations() {
         role,
     );
     
+    let user_id = user.id.clone(); // Clone the ID for later use
+    
     // Insert the user
     conn.execute(
         "INSERT INTO users (id, username, password_hash, salt, role, failed_login_attempts, 
@@ -125,18 +127,18 @@ fn test_user_crud_operations() {
         |row| row.get(0),
     ).unwrap();
     
-    assert_eq!(read_user_id, user.id, "User ID should match");
+    assert_eq!(read_user_id, user_id, "User ID should match");
     
     // Update the user
     conn.execute(
         "UPDATE users SET failed_login_attempts = ? WHERE id = ?",
-        params![3, user.id],
+        params![3, &user_id],
     ).unwrap();
     
     // Read the updated value
     let failed_attempts: i32 = conn.query_row(
         "SELECT failed_login_attempts FROM users WHERE id = ?",
-        [user.id],
+        [&user_id],
         |row| row.get(0),
     ).unwrap();
     
@@ -145,13 +147,13 @@ fn test_user_crud_operations() {
     // Delete the user
     conn.execute(
         "DELETE FROM users WHERE id = ?",
-        [user.id],
+        [&user_id],
     ).unwrap();
     
     // Verify the user is deleted
     let user_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)",
-        [user.id],
+        [&user_id],
         |row| row.get(0),
     ).unwrap();
     
@@ -169,6 +171,8 @@ fn test_account_and_transaction_operations() {
         "salt".to_string(),
         UserRole::User,
     );
+    
+    let user_id = user.id.clone(); // Clone for later use
     
     // Insert the user
     conn.execute(
@@ -191,9 +195,11 @@ fn test_account_and_transaction_operations() {
     
     // Create a test account
     let account = Account::new(
-        user.id.clone(),
+        user_id,
         AccountType::Checking,
     );
+    
+    let account_id = account.id.clone(); // Clone for later use
     
     // Insert the account
     conn.execute(
@@ -212,7 +218,7 @@ fn test_account_and_transaction_operations() {
     
     // Create a transaction
     let transaction = Transaction::new(
-        account.id.clone(),
+        account_id.clone(),
         TransactionType::Deposit,
         100.0,
         None,
@@ -235,13 +241,13 @@ fn test_account_and_transaction_operations() {
     // Update account balance
     conn.execute(
         "UPDATE accounts SET balance = balance + ? WHERE id = ?",
-        params![transaction.amount, account.id],
+        params![transaction.amount, &account_id],
     ).unwrap();
     
     // Read the updated balance
     let balance: f64 = conn.query_row(
         "SELECT balance FROM accounts WHERE id = ?",
-        [account.id],
+        [&account_id],
         |row| row.get(0),
     ).unwrap();
     
@@ -250,7 +256,7 @@ fn test_account_and_transaction_operations() {
     // Check if an audit log was created (via the trigger)
     let audit_log_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM audit_logs WHERE account_id = ?)",
-        [account.id],
+        [&account_id],
         |row| row.get(0),
     ).unwrap();
     

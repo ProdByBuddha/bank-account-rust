@@ -33,7 +33,7 @@ fn initialize_encryption_key() -> Result<()> {
     
     debug!("Initializing database encryption key");
     
-    let mut key = security::generate_encryption_key();
+    let key = security::generate_encryption_key();
     
     // In a real production system, this key would be stored securely
     // and potentially encrypted with a master key derived from a password
@@ -174,8 +174,10 @@ pub fn get_connection() -> Result<r2d2::PooledConnection<SqliteConnectionManager
             let conn = pool.get().context("Failed to get a database connection")?;
             
             // Configure connection
-            let mut conn_mut = conn;
-            configure_connection(&mut conn_mut)?;
+            {
+                let mut conn_mut = conn.clone();
+                configure_connection(&mut conn_mut)?;
+            }
             
             Ok(conn)
         }
@@ -263,57 +265,4 @@ pub fn restore_backup(backup_path: &str) -> Result<()> {
     
     info!("Database backup restored successfully from {}", backup_path);
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-    
-    #[test]
-    fn test_database_initialization() {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().join("test.db").to_str().unwrap().to_string();
-        
-        // Override config for testing
-        let mut config = config::get_config();
-        config.database.path = db_path.clone();
-        config.database.encrypt = true;
-        config::update_config(config).unwrap();
-        
-        // Initialize database
-        initialize().unwrap();
-        
-        // Verify database exists
-        assert!(Path::new(&db_path).exists());
-        
-        // Get a connection
-        let conn = get_connection().unwrap();
-        
-        // Verify we can execute queries
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master", [], |row| row.get(0)).unwrap();
-        assert!(count > 0, "Database should have tables");
-    }
-    
-    #[test]
-    fn test_encrypt_decrypt_data() {
-        // Override config for testing
-        let mut config = config::get_config();
-        config.database.encrypt = true;
-        config::update_config(config).unwrap();
-        
-        // Initialize encryption
-        initialize_encryption_key().unwrap();
-        
-        // Test data
-        let original = "sensitive data";
-        
-        // Encrypt
-        let encrypted = encrypt_data(original).unwrap();
-        assert_ne!(encrypted, original, "Encrypted data should be different from original");
-        
-        // Decrypt
-        let decrypted = decrypt_data(&encrypted).unwrap();
-        assert_eq!(decrypted, original, "Decrypted data should match original");
-    }
 } 

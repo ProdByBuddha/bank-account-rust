@@ -1,5 +1,5 @@
 use anyhow::{Result, Context};
-use qrcode::{QrCode, render::unicode};
+use qrcode::QrCode;
 use std::io::{self, Write};
 use std::time::Duration;
 use std::thread;
@@ -9,15 +9,15 @@ pub fn display_qr_code(uri: &str) -> Result<()> {
     // Create a QR code from the URI
     let code = QrCode::new(uri).context("Failed to create QR code")?;
     
-    // Render the QR code to the terminal
-    let qr = code.render::<unicode::Dense1x2>()
-        .dark_color(unicode::Dense1x2::Light)
-        .light_color(unicode::Dense1x2::Dark)
+    // Render the QR code to ASCII
+    let qr_string = code.render::<char>()
+        .quiet_zone(false)
+        .module_dimensions(2, 1)
         .build();
     
     // Print the QR code
     println!("\nScan this QR code with your authenticator app:\n");
-    println!("{}", qr);
+    println!("{}", qr_string);
     println!();
     
     Ok(())
@@ -25,7 +25,7 @@ pub fn display_qr_code(uri: &str) -> Result<()> {
 
 /// Display a message with a spinning indicator for ongoing operations
 pub fn display_spinner(message: &str, duration: Duration) -> Result<()> {
-    let spinner_chars = vec!['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let spinner_chars = vec!['|', '/', '-', '\\'];
     let mut stdout = io::stdout();
     
     for i in 0..((duration.as_millis() / 100) as usize) {

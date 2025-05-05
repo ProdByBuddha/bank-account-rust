@@ -88,6 +88,9 @@ enum UserCommands {
     
     /// Disable two-factor authentication
     Disable2FA {},
+    
+    /// Generate new 2FA backup codes
+    BackupCodes {},
 }
 
 #[derive(Subcommand)]
@@ -240,12 +243,40 @@ fn main() {
                     // TODO: Implement password change
                 }
                 UserCommands::Enable2FA {} => {
-                    println!("Enabling two-factor authentication");
-                    // TODO: Implement 2FA enablement
+                    // Mock user ID (in a real app, this would be obtained from the authenticated session)
+                    let user_id = "test-user";
+                    
+                    match cli::user::enable_2fa(user_id) {
+                        Ok(_) => {},
+                        Err(err) => {
+                            error!("Error enabling 2FA: {}", err);
+                            process::exit(1);
+                        }
+                    }
                 }
                 UserCommands::Disable2FA {} => {
-                    println!("Disabling two-factor authentication");
-                    // TODO: Implement 2FA disablement
+                    // Mock user ID (in a real app, this would be obtained from the authenticated session)
+                    let user_id = "test-user";
+                    
+                    match cli::user::disable_2fa(user_id) {
+                        Ok(_) => {},
+                        Err(err) => {
+                            error!("Error disabling 2FA: {}", err);
+                            process::exit(1);
+                        }
+                    }
+                }
+                UserCommands::BackupCodes {} => {
+                    // Mock user ID (in a real app, this would be obtained from the authenticated session)
+                    let user_id = "test-user";
+                    
+                    match cli::user::generate_backup_codes(user_id) {
+                        Ok(_) => {},
+                        Err(err) => {
+                            error!("Error generating backup codes: {}", err);
+                            process::exit(1);
+                        }
+                    }
                 }
             }
         }

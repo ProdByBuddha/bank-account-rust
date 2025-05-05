@@ -55,10 +55,12 @@ pub fn create_schema(conn: &mut Connection) -> Result<()> {
             transaction_type TEXT NOT NULL,
             amount REAL NOT NULL,
             reference_id TEXT,
+            to_account_id TEXT,
             encrypted_details TEXT,
             status TEXT NOT NULL,
             timestamp TEXT NOT NULL,
-            FOREIGN KEY (account_id) REFERENCES accounts(id)
+            FOREIGN KEY (account_id) REFERENCES accounts(id),
+            FOREIGN KEY (to_account_id) REFERENCES accounts(id)
         )",
         [],
     ).context("Failed to create transactions table")?;
@@ -82,25 +84,64 @@ pub fn create_schema(conn: &mut Connection) -> Result<()> {
         [],
     ).context("Failed to create audit_logs table")?;
     
-    // Create recurring_transactions table
+    // Create scheduled transactions table
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS scheduled_transactions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            to_account_id TEXT,
+            transaction_type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            scheduled_date TEXT NOT NULL,
+            reference_id TEXT NOT NULL,
+            encrypted_details TEXT,
+            processed INTEGER NOT NULL DEFAULT 0,
+            processed_at TEXT,
+            transaction_id TEXT,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            last_failure TEXT,
+            last_error TEXT,
+            cancelled INTEGER NOT NULL DEFAULT 0,
+            cancelled_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (account_id) REFERENCES accounts(id),
+            FOREIGN KEY (to_account_id) REFERENCES accounts(id),
+            FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+        )",
+        [],
+    ).context("Failed to create scheduled_transactions table")?;
+    
+    // Create recurring transactions table
     tx.execute(
         "CREATE TABLE IF NOT EXISTS recurring_transactions (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
-            from_account_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
             to_account_id TEXT,
-            external_account TEXT,
+            transaction_type TEXT NOT NULL,
             amount REAL NOT NULL,
             frequency TEXT NOT NULL,
-            next_date TEXT NOT NULL,
+            start_date TEXT NOT NULL,
             end_date TEXT,
+            next_date TEXT NOT NULL,
+            reference_base TEXT NOT NULL,
             encrypted_details TEXT,
-            status TEXT NOT NULL,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            last_failure TEXT,
+            last_error TEXT,
+            last_processed_at TEXT,
+            last_transaction_id TEXT,
+            completed INTEGER NOT NULL DEFAULT 0,
+            completed_at TEXT,
+            cancelled INTEGER NOT NULL DEFAULT 0,
+            cancelled_at TEXT,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id),
-            FOREIGN KEY (from_account_id) REFERENCES accounts(id),
-            FOREIGN KEY (to_account_id) REFERENCES accounts(id)
+            FOREIGN KEY (account_id) REFERENCES accounts(id),
+            FOREIGN KEY (to_account_id) REFERENCES accounts(id),
+            FOREIGN KEY (last_transaction_id) REFERENCES transactions(id)
         )",
         [],
     ).context("Failed to create recurring_transactions table")?;
@@ -280,5 +321,159 @@ pub fn create_audit_triggers(conn: &mut Connection) -> Result<()> {
     ).context("Failed to create user_audit_trigger")?;
     
     debug!("Audit triggers created successfully");
+    Ok(())
+}
+
+/// Create tables
+pub fn create_tables(conn: &Connection) -> Result<()> {
+    // ... existing code ...
+    
+    // Transactions table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS transactions (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL,
+            transaction_type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            reference_id TEXT,
+            to_account_id TEXT,
+            encrypted_details TEXT,
+            status TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            FOREIGN KEY (account_id) REFERENCES accounts(id),
+            FOREIGN KEY (to_account_id) REFERENCES accounts(id)
+        )",
+        [],
+    )?;
+    
+    // Scheduled transactions table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS scheduled_transactions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            to_account_id TEXT,
+            transaction_type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            scheduled_date TEXT NOT NULL,
+            reference_id TEXT NOT NULL,
+            encrypted_details TEXT,
+            processed INTEGER NOT NULL DEFAULT 0,
+            processed_at TEXT,
+            transaction_id TEXT,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            last_failure TEXT,
+            last_error TEXT,
+            cancelled INTEGER NOT NULL DEFAULT 0,
+            cancelled_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (account_id) REFERENCES accounts(id),
+            FOREIGN KEY (to_account_id) REFERENCES accounts(id),
+            FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+        )",
+        [],
+    )?;
+    
+    // Recurring transactions table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS recurring_transactions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            to_account_id TEXT,
+            transaction_type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            frequency TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT,
+            next_date TEXT NOT NULL,
+            reference_base TEXT NOT NULL,
+            encrypted_details TEXT,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            last_failure TEXT,
+            last_error TEXT,
+            last_processed_at TEXT,
+            last_transaction_id TEXT,
+            completed INTEGER NOT NULL DEFAULT 0,
+            completed_at TEXT,
+            cancelled INTEGER NOT NULL DEFAULT 0,
+            cancelled_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (account_id) REFERENCES accounts(id),
+            FOREIGN KEY (to_account_id) REFERENCES accounts(id),
+            FOREIGN KEY (last_transaction_id) REFERENCES transactions(id)
+        )",
+        [],
+    )?;
+    
+    // Create indexes for better performance
+    create_indexes(conn)?;
+    
+    Ok(())
+}
+
+/// Create indexes for better performance
+fn create_indexes(conn: &Connection) -> Result<()> {
+    // ... existing code ...
+    
+    // Transaction indexes
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_transactions_account_id 
+         ON transactions(account_id)",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_transactions_timestamp 
+         ON transactions(timestamp)",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_transactions_reference_id 
+         ON transactions(reference_id)",
+        [],
+    )?;
+    
+    // Scheduled transaction indexes
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_transactions_user_id 
+         ON scheduled_transactions(user_id)",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_transactions_scheduled_date 
+         ON scheduled_transactions(scheduled_date)",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_transactions_processed 
+         ON scheduled_transactions(processed)",
+        [],
+    )?;
+    
+    // Recurring transaction indexes
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recurring_transactions_user_id 
+         ON recurring_transactions(user_id)",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recurring_transactions_next_date 
+         ON recurring_transactions(next_date)",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recurring_transactions_completed 
+         ON recurring_transactions(completed)",
+        [],
+    )?;
+    
     Ok(())
 } 

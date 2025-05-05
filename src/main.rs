@@ -146,6 +146,10 @@ enum AccountCommands {
         /// Amount to deposit
         #[clap(short, long)]
         amount: f64,
+        
+        /// Transaction details (will be encrypted)
+        #[clap(long)]
+        details: Option<String>,
     },
     
     /// Withdraw funds
@@ -157,6 +161,10 @@ enum AccountCommands {
         /// Amount to withdraw
         #[clap(short, long)]
         amount: f64,
+        
+        /// Transaction details (will be encrypted)
+        #[clap(long)]
+        details: Option<String>,
     },
     
     /// Transfer funds between accounts
@@ -172,6 +180,10 @@ enum AccountCommands {
         /// Amount to transfer
         #[clap(short, long)]
         amount: f64,
+        
+        /// Transaction details (will be encrypted)
+        #[clap(long)]
+        details: Option<String>,
     },
     
     /// Get account balance
@@ -190,7 +202,105 @@ enum AccountCommands {
         /// Number of transactions to show
         #[clap(short, long, default_value = "10")]
         limit: usize,
+        
+        /// Number of transactions to skip
+        #[clap(long, default_value = "0")]
+        offset: usize,
+        
+        /// Start date (YYYY-MM-DD)
+        #[clap(long)]
+        start_date: Option<String>,
+        
+        /// End date (YYYY-MM-DD)
+        #[clap(long)]
+        end_date: Option<String>,
     },
+    
+    /// Get a transaction receipt
+    Receipt {
+        /// Transaction ID
+        #[clap(long)]
+        id: String,
+    },
+    
+    /// Schedule a future transaction
+    Schedule {
+        /// Account ID
+        #[clap(long)]
+        id: String,
+        
+        /// Transaction type (deposit, withdrawal, transfer)
+        #[clap(long)]
+        r#type: String,
+        
+        /// Amount 
+        #[clap(short, long)]
+        amount: f64,
+        
+        /// Scheduled date (YYYY-MM-DD HH:MM:SS)
+        #[clap(long)]
+        date: String,
+        
+        /// Destination account ID (for transfers)
+        #[clap(long)]
+        to: Option<String>,
+        
+        /// Transaction details (will be encrypted)
+        #[clap(long)]
+        details: Option<String>,
+    },
+    
+    /// Create a recurring transaction
+    Recurring {
+        /// Account ID
+        #[clap(long)]
+        id: String,
+        
+        /// Transaction type (deposit, withdrawal, transfer)
+        #[clap(long)]
+        r#type: String,
+        
+        /// Amount
+        #[clap(short, long)]
+        amount: f64,
+        
+        /// Frequency (daily, weekly, biweekly, monthly, quarterly, yearly)
+        #[clap(long)]
+        frequency: String,
+        
+        /// Start date (YYYY-MM-DD)
+        #[clap(long)]
+        start_date: String,
+        
+        /// End date (YYYY-MM-DD)
+        #[clap(long)]
+        end_date: Option<String>,
+        
+        /// Destination account ID (for transfers)
+        #[clap(long)]
+        to: Option<String>,
+        
+        /// Transaction details (will be encrypted)
+        #[clap(long)]
+        details: Option<String>,
+    },
+    
+    /// Cancel a scheduled transaction
+    CancelScheduled {
+        /// Scheduled transaction ID
+        #[clap(long)]
+        id: String,
+    },
+    
+    /// Cancel a recurring transaction
+    CancelRecurring {
+        /// Recurring transaction ID
+        #[clap(long)]
+        id: String,
+    },
+    
+    /// Run the scheduler to process pending scheduled transactions
+    ProcessScheduled {},
     
     /// List all accounts
     List {
@@ -494,7 +604,7 @@ fn main() {
                         }
                     }
                 },
-                AccountCommands::Deposit { id, amount } => {
+                AccountCommands::Deposit { id, amount, details } => {
                     match get_auth_token() {
                         Some(token) => {
                             let conn = database::get_connection().unwrap_or_else(|e| {
@@ -511,7 +621,7 @@ fn main() {
                                         id, 
                                         crate::database::models::TransactionType::Deposit, 
                                         *amount,
-                                        None
+                                        details
                                     ) {
                                         Ok(transaction) => {
                                             println!("✅ Deposit successful!");
@@ -541,7 +651,7 @@ fn main() {
                         }
                     }
                 },
-                AccountCommands::Withdraw { id, amount } => {
+                AccountCommands::Withdraw { id, amount, details } => {
                     match get_auth_token() {
                         Some(token) => {
                             let conn = database::get_connection().unwrap_or_else(|e| {
@@ -558,7 +668,7 @@ fn main() {
                                         id, 
                                         crate::database::models::TransactionType::Withdrawal, 
                                         *amount,
-                                        None
+                                        details
                                     ) {
                                         Ok(transaction) => {
                                             println!("✅ Withdrawal successful!");
@@ -588,7 +698,7 @@ fn main() {
                         }
                     }
                 },
-                AccountCommands::Transfer { from, to, amount } => {
+                AccountCommands::Transfer { from, to, amount, details } => {
                     match get_auth_token() {
                         Some(token) => {
                             let conn = database::get_connection().unwrap_or_else(|e| {
@@ -605,7 +715,7 @@ fn main() {
                                         from, 
                                         to, 
                                         *amount,
-                                        None
+                                        details
                                     ) {
                                         Ok(transaction) => {
                                             println!("✅ Transfer successful!");
@@ -657,9 +767,33 @@ fn main() {
                         }
                     }
                 },
-                AccountCommands::History { id, limit } => {
-                    println!("Viewing transaction history for account: {} (limit: {})", id, limit);
+                AccountCommands::History { id, limit, offset, start_date, end_date } => {
+                    println!("Viewing transaction history for account: {} (limit: {}, offset: {}, start_date: {}, end_date: {})", id, limit, offset, start_date.as_deref().unwrap_or("None"), end_date.as_deref().unwrap_or("None"));
                     // TODO: Implement transaction history
+                },
+                AccountCommands::Receipt { id } => {
+                    println!("Getting transaction receipt for transaction: {}", id);
+                    // TODO: Implement receipt retrieval
+                },
+                AccountCommands::Schedule { id, r#type, amount, date, to, details } => {
+                    println!("Scheduling transaction: {} {} {} {} {} {}", id, r#type, amount, date, to.as_deref().unwrap_or("None"), details.as_deref().unwrap_or("None"));
+                    // TODO: Implement transaction scheduling
+                },
+                AccountCommands::Recurring { id, r#type, amount, frequency, start_date, end_date, to, details } => {
+                    println!("Creating recurring transaction: {} {} {} {} {} {} {} {}", id, r#type, amount, frequency, start_date, end_date.as_deref().unwrap_or("None"), to.as_deref().unwrap_or("None"), details.as_deref().unwrap_or("None"));
+                    // TODO: Implement recurring transaction creation
+                },
+                AccountCommands::CancelScheduled { id } => {
+                    println!("Canceling scheduled transaction: {}", id);
+                    // TODO: Implement scheduled transaction cancellation
+                },
+                AccountCommands::CancelRecurring { id } => {
+                    println!("Canceling recurring transaction: {}", id);
+                    // TODO: Implement recurring transaction cancellation
+                },
+                AccountCommands::ProcessScheduled {} => {
+                    println!("Running scheduler to process pending scheduled transactions");
+                    // TODO: Implement scheduled transaction processing
                 },
                 AccountCommands::List { user_id } => {
                     match get_auth_token() {

@@ -45,6 +45,7 @@ totp-rs = "5.0"
 uuid = { version = "1.5", features = ["v4", "serde"] }
 lazy_static = "1.4"
 toml = "0.7"
+regex = "1.9"
 
 # Testing
 tempfile = "3.8"

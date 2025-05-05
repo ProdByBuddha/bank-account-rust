@@ -34,6 +34,16 @@ pub struct SecurityConfig {
     pub max_failed_attempts: u8,
     /// Account lockout duration in minutes
     pub lockout_duration: u64,
+    /// Master password for key encryption (in a real app, this would be securely stored)
+    pub master_password: String,
+    /// Master salt for key encryption
+    pub master_salt: Option<String>,
+    /// Path to the encryption key store
+    pub key_store_path: String,
+    /// Key rotation period in days
+    pub key_rotation_days: Option<u64>,
+    /// Default encryption algorithm
+    pub default_encryption: String,
 }
 
 /// Audit configuration
@@ -80,6 +90,11 @@ impl Default for Config {
                 min_password_length: 12,
                 max_failed_attempts: 5,
                 lockout_duration: 30, // 30 minutes
+                master_password: "change_me_in_production".to_string(),
+                master_salt: Some("secure_bank_salt_v1".to_string()),
+                key_store_path: "data/keys".to_string(),
+                key_rotation_days: Some(90),
+                default_encryption: "AES-256-GCM".to_string(),
             },
             audit: AuditConfig {
                 log_path: "logs".to_string(),
@@ -166,6 +181,7 @@ mod tests {
         assert_eq!(config.app_name, "Secure Banking CLI");
         assert!(config.database.encrypt);
         assert_eq!(config.security.min_password_length, 12);
+        assert_eq!(config.security.default_encryption, "AES-256-GCM");
     }
 
     #[test]
@@ -185,5 +201,6 @@ mod tests {
         assert_eq!(loaded_config.app_name, config.app_name);
         assert_eq!(loaded_config.database.encrypt, config.database.encrypt);
         assert_eq!(loaded_config.security.min_password_length, config.security.min_password_length);
+        assert_eq!(loaded_config.security.key_store_path, config.security.key_store_path);
     }
 } 

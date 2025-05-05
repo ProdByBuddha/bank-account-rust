@@ -10,7 +10,19 @@ use base64::{engine::general_purpose, Engine as _};
 pub mod jwt;
 pub mod totp;
 pub mod compliance;
-pub mod password;  // New password module with pepper support
+pub mod password;
+pub mod encryption;  // New encryption module with enhanced key management
+
+// Re-export key functions from encryption module
+pub use encryption::{
+    encrypt_string as encrypt_with_current_key,
+    decrypt_string as decrypt_with_current_key,
+    generate_secure_token,
+    derive_key_from_password as derive_key,
+    hash_sha256,
+    hash_sha512,
+    generate_random_bytes,
+};
 
 // Length of the AES-256 key
 const AES_KEY_LEN: usize = 32;
@@ -22,18 +34,21 @@ pub fn initialize() -> Result<()> {
     // Initialize password pepper
     password::initialize_password_pepper()?;
     
+    // Initialize encryption key store
+    encryption::initialize()?;
+    
     debug!("Security components initialized");
     Ok(())
 }
 
-/// Generate a random AES-256 key
+/// Generate a random AES-256 key (legacy method, prefer using encryption module)
 pub fn generate_encryption_key() -> [u8; AES_KEY_LEN] {
     let mut key = [0u8; AES_KEY_LEN];
     OsRng.fill_bytes(&mut key);
     key
 }
 
-/// Encrypt data with AES-256-GCM
+/// Encrypt data with AES-256-GCM (legacy method, prefer using encryption module)
 pub fn encrypt(plaintext: &[u8], key: &[u8; AES_KEY_LEN]) -> Result<Vec<u8>> {
     // Create cipher instance
     let cipher = Aes256Gcm::new_from_slice(key)
@@ -56,7 +71,7 @@ pub fn encrypt(plaintext: &[u8], key: &[u8; AES_KEY_LEN]) -> Result<Vec<u8>> {
     Ok(result)
 }
 
-/// Decrypt data with AES-256-GCM
+/// Decrypt data with AES-256-GCM (legacy method, prefer using encryption module)
 pub fn decrypt(ciphertext: &[u8], key: &[u8; AES_KEY_LEN]) -> Result<Vec<u8>> {
     // Split the input into nonce and ciphertext
     if ciphertext.len() <= NONCE_LEN {
@@ -77,13 +92,13 @@ pub fn decrypt(ciphertext: &[u8], key: &[u8; AES_KEY_LEN]) -> Result<Vec<u8>> {
     Ok(plaintext)
 }
 
-/// Encrypt a string with AES-256-GCM and encode with base64
+/// Encrypt a string with AES-256-GCM and encode with base64 (legacy method, prefer using encryption module)
 pub fn encrypt_string(plaintext: &str, key: &[u8; AES_KEY_LEN]) -> Result<String> {
     let encrypted = encrypt(plaintext.as_bytes(), key)?;
     Ok(general_purpose::STANDARD.encode(&encrypted))
 }
 
-/// Decrypt a base64-encoded AES-256-GCM ciphertext
+/// Decrypt a base64-encoded AES-256-GCM ciphertext (legacy method, prefer using encryption module)
 pub fn decrypt_string(ciphertext: &str, key: &[u8; AES_KEY_LEN]) -> Result<String> {
     let decoded = general_purpose::STANDARD.decode(ciphertext)
         .context("Failed to decode base64 ciphertext")?;
@@ -94,7 +109,7 @@ pub fn decrypt_string(ciphertext: &str, key: &[u8; AES_KEY_LEN]) -> Result<Strin
         .context("Failed to convert decrypted data to UTF-8 string")
 }
 
-/// Derive an encryption key from a password using PBKDF2
+/// Derive an encryption key from a password using PBKDF2 (legacy method, prefer using encryption module)
 pub fn derive_key_from_password(password: &str, salt: &[u8], iterations: u32) -> Result<[u8; AES_KEY_LEN]> {
     use pbkdf2::pbkdf2;
     use hmac::Hmac;
@@ -110,21 +125,6 @@ pub fn derive_key_from_password(password: &str, salt: &[u8], iterations: u32) ->
     ).map_err(|e| anyhow!("Failed to derive key from password: {}", e))?;
     
     Ok(key)
-}
-
-/// Generate a secure random token
-pub fn generate_secure_token(length: usize) -> String {
-    use rand::Rng;
-    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    
-    let mut rng = OsRng;
-    
-    (0..length)
-        .map(|_| {
-            let idx = rng.gen_range(0..CHARSET.len());
-            CHARSET[idx] as char
-        })
-        .collect()
 }
 
 #[cfg(test)]

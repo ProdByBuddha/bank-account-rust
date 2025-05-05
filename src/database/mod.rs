@@ -16,47 +16,9 @@ mod migrations;
 #[cfg(test)]
 mod tests;
 
-// Database encryption key
+// Database connection pool
 lazy_static! {
-    static ref DB_ENCRYPTION_KEY: RwLock<Option<[u8; 32]>> = RwLock::new(None);
     static ref DB_POOL: RwLock<Option<Pool<SqliteConnectionManager>>> = RwLock::new(None);
-}
-
-/// Initialize the database encryption key
-fn initialize_encryption_key() -> Result<()> {
-    let config = config::get_config();
-    
-    if !config.database.encrypt {
-        debug!("Database encryption is disabled");
-        return Ok(());
-    }
-    
-    debug!("Initializing database encryption key");
-    
-    let key = security::generate_encryption_key();
-    
-    // In a real production system, this key would be stored securely
-    // and potentially encrypted with a master key derived from a password
-    // or stored in a hardware security module.
-    // 
-    // For this implementation, we'll store it in memory only
-    
-    // Store the key in the global variable
-    *DB_ENCRYPTION_KEY.write().unwrap() = Some(key);
-    
-    debug!("Database encryption key initialized");
-    Ok(())
-}
-
-/// Get the database encryption key
-fn get_encryption_key() -> Result<[u8; 32]> {
-    match *DB_ENCRYPTION_KEY.read().unwrap() {
-        Some(key) => Ok(key),
-        None => {
-            warn!("Database encryption key not initialized");
-            Err(anyhow::anyhow!("Database encryption key not initialized"))
-        }
-    }
 }
 
 /// Initialize the database
@@ -73,11 +35,6 @@ pub fn initialize() -> Result<()> {
     
     // Check if database exists
     let db_exists = Path::new(db_path).exists();
-    
-    // Initialize encryption if enabled
-    if config.database.encrypt {
-        initialize_encryption_key().context("Failed to initialize database encryption")?;
-    }
     
     // Create connection manager
     let manager = SqliteConnectionManager::file(db_path);
@@ -175,8 +132,9 @@ pub fn get_connection() -> Result<r2d2::PooledConnection<SqliteConnectionManager
             
             // Configure connection
             {
-                let mut conn_mut = conn.clone();
-                configure_connection(&mut conn_mut)?;
+                // Get a new connection with the same config to configure
+                let mut new_conn = Connection::open(db_path)?;
+                configure_connection(&mut new_conn)?;
             }
             
             Ok(conn)
@@ -203,8 +161,8 @@ pub fn encrypt_data(data: &str) -> Result<String> {
         return Ok(data.to_string());
     }
     
-    let key = get_encryption_key()?;
-    security::encrypt_string(data, &key)
+    // Use the enhanced encryption module
+    security::encrypt_with_current_key(data)
 }
 
 /// Decrypt data retrieved from the database
@@ -214,8 +172,8 @@ pub fn decrypt_data(data: &str) -> Result<String> {
         return Ok(data.to_string());
     }
     
-    let key = get_encryption_key()?;
-    security::decrypt_string(data, &key)
+    // Use the enhanced encryption module
+    security::decrypt_with_current_key(data)
 }
 
 /// Create a backup of the database

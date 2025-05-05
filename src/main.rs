@@ -227,10 +227,14 @@ fn main() {
         }
         Commands::Login { username, twofa } => {
             println!("Logging in as user: {}", username);
-            if *twofa {
-                println!("Two-factor authentication enabled");
+            
+            match cli::auth::login(username, *twofa) {
+                Ok(_) => {},
+                Err(err) => {
+                    error!("Error logging in: {}", err);
+                    process::exit(1);
+                }
             }
-            // TODO: Implement login logic
         }
         Commands::User { command } => {
             match command {

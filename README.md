@@ -22,8 +22,8 @@ A security-focused terminal-based banking system written in Rust. This applicati
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/prodbybuddha/secure-bank-cli.git
-   cd secure-bank-cli
+   git clone https://github.com/prodbybuddha/bank-account-rust.git
+   cd bank-account-rust
    ```
 
 2. Build the project:
@@ -35,7 +35,7 @@ A security-focused terminal-based banking system written in Rust. This applicati
 3. Run the executable:
 
    ```bash
-   ./target/release/secure-bank-cli
+   ./target/release/bank-account-rust
    ```
 
 ## Usage
@@ -44,55 +44,55 @@ A security-focused terminal-based banking system written in Rust. This applicati
 
 ```bash
 # Initialize the system and create admin user
-secure-bank-cli init
+bank-account-rust init
 
 # Login as admin
-secure-bank-cli login --username admin
+bank-account-rust login --username admin
 ```
 
 ### User Management
 
 ```bash
 # Create a new user
-secure-bank-cli user create --username john --role user
+bank-account-rust user create --username john --role user
 
 # Change password
-secure-bank-cli user change-password
+bank-account-rust user change-password
 
 # Enable 2FA
-secure-bank-cli user enable-2fa
+bank-account-rust user enable-2fa
 ```
 
 ### Account Operations
 
 ```bash
 # Create a new account
-secure-bank-cli account create --type checking
+bank-account-rust account create --type checking
 
 # Deposit funds
-secure-bank-cli account deposit --id ACCOUNT_ID --amount 100.00
+bank-account-rust account deposit --id ACCOUNT_ID --amount 100.00
 
 # Withdraw funds
-secure-bank-cli account withdraw --id ACCOUNT_ID --amount 50.00
+bank-account-rust account withdraw --id ACCOUNT_ID --amount 50.00
 
 # Transfer funds
-secure-bank-cli account transfer --from ACCOUNT_ID --to ACCOUNT_ID --amount 25.00
+bank-account-rust account transfer --from ACCOUNT_ID --to ACCOUNT_ID --amount 25.00
 
 # View balance
-secure-bank-cli account balance --id ACCOUNT_ID
+bank-account-rust account balance --id ACCOUNT_ID
 
 # View transaction history
-secure-bank-cli account history --id ACCOUNT_ID
+bank-account-rust account history --id ACCOUNT_ID
 ```
 
 ### Security Operations
 
 ```bash
 # Run PCI-DSS compliance check
-secure-bank-cli security compliance-check
+bank-account-rust security compliance-check
 
 # Export encrypted backup
-secure-bank-cli security backup --output backup.enc
+bank-account-rust security backup --output backup.enc
 ```
 
 ## Security Considerations

@@ -1,0 +1,66 @@
+[package]
+name = "secure-bank-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A security-focused terminal-based banking system"
+readme = "README.md"
+license = "GPL-3.0"
+
+[dependencies]
+# CLI argument parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# Database
+rusqlite = { version = "0.29", features = ["bundled", "backup"] }
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.22"
+
+# Encryption and security
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+chacha20poly1305 = "0.10"
+pbkdf2 = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.21"
+hex = "0.4"
+
+# JWT and JOSE
+jsonwebtoken = "9.1"
+josekit = "0.8"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.10"
+dotenv = "0.15"
+totp-rs = "5.0"
+uuid = { version = "1.5", features = ["v4", "serde"] }
+lazy_static = "1.4"
+toml = "0.7"
+regex = "1.9"
+qrcode = "0.12"
+base32 = "0.4"
+flate2 = "1.0"
+
+# Testing
+tempfile = "3.8"
+
+[dev-dependencies]
+rstest = "0.18"
+mockall = "0.11"
+test-case = "3.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true 

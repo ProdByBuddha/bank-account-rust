@@ -95,31 +95,6 @@ secure-bank-cli security compliance-check
 secure-bank-cli security backup --output backup.enc
 ```
 
-## Development Metrics
-
-This project includes a commit statistics tracking script to help estimate development time and costs.
-
-### Using the Commit Statistics Tracker
-
-```bash
-# Log statistics for the most recent commit
-./commit_stats.py log --hours 2.5
-
-# Log statistics for a specific commit with custom hourly rate
-./commit_stats.py log --commit abc123 --hours 3.0 --rate 175
-
-# Generate a report of all logged commits
-./commit_stats.py report
-```
-
-The script tracks:
-- Time spent per commit
-- Code changes (files, insertions, deletions)
-- Cost based on hourly rate
-- Project totals for time and cost
-
-Data is stored in `commit_statistics.json` for easy analysis.
-
 ## Security Considerations
 
 This application implements industry-standard security practices:
